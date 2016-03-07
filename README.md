@@ -1,11 +1,11 @@
 # Supertone
 
-Supertone is a small music application written in Clojure for simple, quick,
-and modular production of electronic tunes.  Generative music elements are
-planned for future versions.
+Supertone is a high-level music workstation focused on quick, modular of
+electronic tunes in a live setting. Generative music elements are planned
+for future versions.
 
-This project is still in the works, so bookmark this page, and check back in a
-few months!
+This project is still in progress, so bookmark this page, and check back in a
+month or two!
 
 <!--
 
