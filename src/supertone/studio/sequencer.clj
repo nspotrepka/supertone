@@ -38,7 +38,7 @@
           c (drop mid bc)]
       (concat (map concat a c) b))))
 
-(defn- rotate-reverse
+(defn rotate-reverse
   [v]
   (reverse (concat (rest v) [(first v)])))
 
