@@ -56,3 +56,11 @@
                  (reduce distribute-append seq (repeat (- q 1) k)))
             s1 (if (<= m 1) s0 (distribute-append s0 m))]
         (recur s1 k m)))))
+
+;; Compound bjorklund
+;; Complex pattern generation (with repetition + syncopation)
+;; Create sequence from pattern
+;; Add param pattern to sequence
+;; Remove param from sequence
+
+;; instrument, type (mono/poly), pulse length, sequence length, swing

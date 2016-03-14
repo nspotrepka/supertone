@@ -70,7 +70,7 @@
         busses (map (fn [_] (bus/audio)) (range n))
         insts  (shuffle
                  (map
-                   #(:name (audio/inst-add! audio/mono-pass (str "NOTICE ME " %)))
+                   #(:name (audio/inst-add! "mono-pass" (str "NOTICE ME " %)))
                    (range n)))]
     (doall (map #(audio/inst-in! %1 (:id %2)) insts busses))
     (doall (map #(audio/inst-out! %1 (:id %2)) (butlast insts) (rest busses)))

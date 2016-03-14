@@ -9,66 +9,97 @@
                 :audio
                 "Reserved Audio Busses"))
 
-(defrecord Bus [bus-vec-audio bus-vec-control])
+(defrecord Bus [bus-audio bus-control])
 
-(def bus-vec-audio* (atom nil))
-(def bus-vec-control* (atom nil))
+(def bus-audio* (atom nil))
+(def bus-control* (atom nil))
 
-(defn index
-  "Get the index of a bus."
+(defn bus-id
+  "Get the id of a bus."
   [bus]
   (float (:id bus)))
 
 (defn float-range
   "Create a range of bus numbers."
   [index n-chans]
-  (into [] (map float (take n-chans (drop index (range))))))
+  (if (or (nil? index) (< index 0))
+    []
+    (into [] (map float (take n-chans (drop index (range)))))))
 
 (defn bus-range
   "Convert a bus to a vector of bus numbers."
   [bus]
   (float-range (:id bus) (:n-channels bus)))
 
-(defn bus-vec-init
-  "Append bus indices to a vector."
+(defn bus-into
+  "Add bus indices to a vector."
   [vec bus]
-  (into vec (bus-range bus)))
+  (sort (into vec (bus-range bus))))
 
 (defn init
   [s]
   (map->Bus {
-    :bus-vec-audio   (util/swap-or bus-vec-audio*
-                                   (:bus-vec-audio s)
-                                   (bus-vec-init [] hardware))
-    :bus-vec-control (util/swap-or bus-vec-control*
-                                   (:bus-vec-control s)
-                                   [])
+    :bus-audio   (util/swap-or bus-audio*
+                                   (:bus-audio s)
+                                   (bus-into [] hardware))
+    :bus-control (util/swap-or bus-control*
+                                   (:bus-control s)
+                                   '())
     }))
 
 (defn dispose
   [s]
   (map->Bus {
-    :bus-vec-audio   (or @bus-vec-audio* (:bus-vec-audio s))
-    :bus-vec-control (or @bus-vec-control* (:bus-vec-control s))
+    :bus-audio   (or @bus-audio* (:bus-audio s))
+    :bus-control (or @bus-control* (:bus-control s))
     }))
 
 (defn audio
   "Allocate an audio bus."
-  ([] (let [bus (audio-bus)]
-        (swap! bus-vec-audio* bus-vec-init bus)
-        bus))
+  ([] (audio 1))
   ([n] (let [bus (audio-bus n)]
-         (swap! bus-vec-audio* bus-vec-init bus)
+         (swap! bus-audio* bus-into bus)
          bus)))
 
 (defn control
   "Allocate a control bus."
-  ([] (let [bus (control-bus)]
-        (swap! bus-vec-control* bus-vec-init bus)
-        bus))
+  ([] (control 1))
   ([n] (let [bus (control-bus n)]
-         (swap! bus-vec-control* bus-vec-init bus)
+         (swap! bus-control* bus-into bus)
          bus)))
+
+(defn alloc-audio-id?
+  ([index] (alloc-audio-id? index 1))
+  ([index n-chans]
+    (=
+      (float-range index n-chans)
+      (take n-chans (drop-while #(not= (float index) %) @bus-audio*)))))
+
+(defn alloc-control-id?
+  ([index] (alloc-control-id? index 1))
+  ([index n-chans]
+    (=
+      (float-range index n-chans)
+      (take n-chans (drop-while #(not= (float index) %) @bus-control*)))))
+
+(defn free
+  "Free a bus."
+  [bus]
+  (free-bus bus))
+
+(defn free-audio-id
+  "Free an audio bus by id."
+  ([index] (free-audio-id index 1))
+  ([index n-chans]
+   (swap! bus-audio* (partial remove (into #{} (float-range index n-chans))))
+   (overtone.sc.machinery.allocator/free-id :audio-bus (int index) n-chans)))
+
+(defn free-control-id
+  "Free a control bus by id."
+  ([index] (free-control-id index 1))
+  ([index n-chans]
+   (swap! bus-control* (partial remove (into #{} (float-range index n-chans))))
+   (overtone.sc.machinery.allocator/free-id :control-bus (int index) n-chans)))
 
 (defn monitors
   "Returns the bus monitors of a bus."

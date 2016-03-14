@@ -97,14 +97,14 @@
 (defn ctl-in!
   "Set control node input bus."
   [n bus]
-  (ctl-param! n :in-bus bus)
+  (ctl-param! n :in-bus (float bus))
   (ctl-io-swap! n)
   (sort-node-tree))
 
 (defn ctl-out!
   "Set control node output bus."
   [n bus]
-  (ctl-param! n :out-bus bus)
+  (ctl-param! n :out-bus (float bus))
   (ctl-io-swap! n)
   (sort-node-tree))
 
