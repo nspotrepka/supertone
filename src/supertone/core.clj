@@ -7,16 +7,15 @@
             [supertone.studio.control     :as control]
             [supertone.studio.audio       :as audio]
             [supertone.studio.sequencer   :as sequencer]
-            [quil.core                    :as q])
+            [supertone.view.gui           :as gui])
   (:gen-class :main true))
 
 (defrecord Session [bus groups metro audio])
 
 (defn init
-  "Initializes Supertone, syncing if already initialized."
+  "Initialize Supertone, syncing if already initialized."
   ([] (init nil))
   ([s]
-    ;; (boot-external-server)
     (ensure-connected!)
     (map->Session {
       :bus       (bus/init (:bus s))
@@ -24,13 +23,13 @@
       :metro     (metro/init (:metro s))
       :control   (control/init (:control s))
       :audio     (audio/init (:audio s))
-      :sequencer (sequencer/init (:sequencer s))})))
+      :sequencer (sequencer/init (:sequencer s))
+      :gui       (gui/init (:gui s))})))
 
 (defn dispose
-  "Cleans up Supertone."
+  "Clean up Supertone."
   ([] (dispose nil))
   ([s]
-    ;; (dispose (:applet @gui*))
     (ensure-connected!)
     (map->Session {
       :bus       (bus/dispose (:bus s))
@@ -38,7 +37,8 @@
       :metro     (metro/dispose (:metro s))
       :control   (metro/dispose (:control s))
       :audio     (audio/dispose (:audio s))
-      :sequencer (sequencer/dispose (:sequencer s))})))
+      :sequencer (sequencer/dispose (:sequencer s))
+      :gui       (gui/dispose (:gui s))})))
 
 (defn -main
   "Not that useful."

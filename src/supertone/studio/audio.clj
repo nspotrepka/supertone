@@ -3,6 +3,8 @@
                                                 :refer :all]
             [overtone.sc.server                 :only [ensure-connected!]
                                                 :refer :all]
+            [overtone.sc.machinery.synthdef     :only [load-synthdef]
+                                                :refer :all]
             [overtone.sc.machinery.server.comms :only [with-server-sync]
                                                 :refer :all]
             [overtone.sc.bus                    :refer :all]
@@ -14,7 +16,8 @@
             [overtone.studio.inst               :refer :all]
             [supertone.util                     :as util]
             [supertone.studio.groups            :as groups]
-            [supertone.studio.bus               :as bus]))
+            [supertone.studio.bus               :as bus]
+            [supertone.studio.control           :as control]))
 
 (def nil-id -1000)
 
@@ -26,10 +29,17 @@
   [in-bus nil-id]
   (in in-bus 2))
 
-(defrecord Audio [inst-map fx-map inst-io])
+(definst sawboy
+  [freq 220]
+  (saw freq))
+
+(defrecord Audio [inst-map inst-ctl inst-nodes fx-map fx-ctl inst-io])
 
 (def inst-map* (atom nil))
+(def inst-ctl* (atom nil))
+(def inst-nodes* (atom nil))
 (def fx-map* (atom nil))
+(def fx-ctl* (atom nil))
 (def inst-io* (atom nil))
 (def node-order* (atom nil))
 
@@ -37,19 +47,28 @@
   [s]
   (map->Audio {
     :inst-map   (util/swap-or inst-map* (:inst-map s) {})
+    :inst-ctl   (util/swap-or inst-ctl* (:inst-ctl s) {})
+    :inst-nodes (util/swap-or inst-nodes* (:inst-nodes s) {})
     :fx-map     (util/swap-or fx-map* (:fx-map s) {})
+    :fx-ctl     (util/swap-or fx-ctl* (:fx-ctl s) {})
     :inst-io    (util/swap-or inst-io* (:inst-io s) {})
-    :node-order (util/swap-or node-order* (:node-order s) {})
-    }))
+    :node-order (util/swap-or node-order* (:node-order s) {})}))
 
 (defn dispose
   [s]
   (map->Audio {
     :inst-map   (or @inst-map* (:inst-map s))
+    :inst-ctl   (or @inst-ctl* (:inst-ctl s))
+    :inst-nodes (or @inst-nodes* (:inst-nodes s))
     :fx-map     (or @fx-map* (:fx-map s))
+    :fx-ctl     (or @fx-ctl* (:fx-ctl s))
     :inst-io    (or @inst-io* (:inst-io s))
-    :node-order (or @node-order* (:node-order s))
-    }))
+    :node-order (or @node-order* (:node-order s))}))
+
+(defn inst-library
+  "List the instruments available to add."
+  []
+  (:instruments @studio*))
 
 (defn inst-list
   "List instrument names."
@@ -61,21 +80,107 @@
   [name]
   (get @inst-map* name))
 
-(defn- inst-param-map
+(defn inst-params
+  "Get instrument parameter names."
+  [name]
+  (:args (inst-get name)))
+
+(defn inst-ctl-nodes
+  "Get the list of synths controlling an instrument parameter."
+  [name pname]
+  (or (get-in @inst-ctl* [name pname]) []))
+
+(defn inst-nodes
+  "Get all the active nodes associated with an instrument."
+  [name]
+  (or (get @inst-nodes* name) []))
+
+(defn- inst-param-all
   [name pname]
   (first (filter #(= (:name %) pname) (:params (inst-get name)))))
 
 (defn inst-param
-  "Get instrument param."
+  "Get instrument parameter."
   [name pname]
-  (let [a (:value (inst-param-map name pname))]
-    (if (nil? a) nil @a)))
+  (let [a         (:value (inst-param-all name pname))
+        ctl-nodes (inst-ctl-nodes name pname)]
+    (if (empty? ctl-nodes)
+      (if (nil? a) nil @a)
+      (control-bus-get
+        (int (node-get-control (first ctl-nodes) :in-bus1))))))
 
 (defn inst-param!
-  "Set instrument param."
+  "Set instrument parameter."
   [name pname value]
-  (swap! (:value (inst-param-map name pname)) (constantly value))
-  (ctl (inst-get name) pname value))
+  (let [inst      (inst-get name)
+        ctl-nodes (inst-ctl-nodes name pname)]
+    (swap! (:value (inst-param-all name pname)) (constantly value))
+    (if (empty? ctl-nodes)
+      (ctl inst pname value)
+      (control-bus-set!
+        (int (node-get-control (first ctl-nodes) :in-bus1))
+        value))))
+
+(defn- inst-ctl-map
+  [name pname bus]
+  (dorun (map #(node-map-controls* % [pname (int bus)]) (inst-nodes name))))
+
+(defn inst-ctl-add!
+  "Add a control bus to an instrument parameter."
+  [name pname bus]
+  (let [ctl-nodes (inst-ctl-nodes name pname)
+        in-bus1   (if (empty? ctl-nodes)
+                    (let [b (bus/control)]
+                      (control-bus-set! b (inst-param name pname))
+                      b)
+                    (node-get-control (last ctl-nodes) :out-bus))
+        out-bus   (bus/control)
+        ctl-node  (control/mix
+                    [:tail (groups/control)]
+                    :in-bus1 in-bus1
+                    :in-bus2 bus
+                    :out-bus out-bus)]
+    (inst-ctl-map name pname (bus/bus-id out-bus))
+    (swap! inst-ctl* update-in [name pname]
+      #(into (if (nil? %) [] %) [ctl-node]))
+    ctl-node))
+
+(defn inst-ctl-remove!
+  "Remove a control node from an instrument parameter."
+  [name pname ctl-node]
+  (let [in-bus1   (node-get-control ctl-node "in-bus1")
+        out-bus   (node-get-control ctl-node "out-bus")
+        ctl-nodes (inst-ctl-nodes name pname)
+        index     (.indexOf ctl-nodes ctl-node)]
+    (if (< (+ index 1) (count ctl-nodes))
+      (let [next-node (get ctl-nodes (+ index 1))]
+        (node-control* next-node ["in-bus1" (int in-bus1)]))
+      (inst-ctl-map name pname in-bus1))
+    (swap! inst-ctl* update-in [name pname]
+      #(into [] (remove #{ctl-node} %)))
+    (when (empty? (inst-ctl-nodes name pname))
+      (inst-param! name pname (control-bus-get (int in-bus1)))
+      (bus/free-control-id in-bus1))
+    (node-free* ctl-node)
+    (bus/free-control-id out-bus)
+    nil))
+
+(defn inst-ctl-clear!
+  "Clear all control nodes from an instrument parameter."
+  [name pname]
+  (dorun (map
+    #(inst-ctl-remove! name pname %)
+    (inst-ctl-nodes name pname))))
+
+(defn ctl-amt
+  "Get the control's magnitude."
+  [ctl-node]
+  (node-get-control ctl-node :amt))
+
+(defn ctl-amt!
+  "Set the control's magnitude."
+  [ctl-node amt]
+  (node-control* ctl-node [:amt amt]))
 
 (defn inst-in
   "Get instrument input bus."
@@ -87,22 +192,115 @@
   [name]
   (node-get-control (:mixer (inst-get name)) :out-bus))
 
-(defn inst-rename!
-  "Rename an instrument."
-  [name new-name]
-  (let [inst (inst-get name)]
-    (swap! inst-map* dissoc name)
-    (swap! inst-map* assoc new-name inst)
-    inst))
+(defn fx-nodes
+  "Get the fx nodes of an instrument"
+  [name]
+  (or (map #(:node %) (get @fx-map* name)) []))
 
 (defn fx-get
   "Get instrument fx chain."
-  ([name] (get @fx-map* name))
-  ([name fx-node] (first (filter #(= (:node %) fx-node) (fx-get name)))))
+  [name fx-node]
+  (first (filter #(= (:node %) fx-node) (get @fx-map* name))))
+
+(defn fx-ctl-nodes
+  "Get the list of synths controlling an fx parameter."
+  [name fx-node pname]
+  (or (get-in @fx-ctl* [name fx-node pname]) []))
+
+(defn fx-params
+  "Get all fx parameters."
+  [name fx-node]
+  (:args (:synth (fx-get name fx-node))))
+
+(defn fx-param
+  "Get fx parameter(s)."
+  [name fx-node pname]
+  (let [nodes (if (vector? fx-node) fx-node [fx-node])]
+    (util/single (map
+      (fn [fx-n]
+        (let [ctl-nodes (fx-ctl-nodes name fx-n pname)]
+          (if (empty? ctl-nodes)
+            (node-get-control fx-n pname)
+            (control-bus-get
+              (int (node-get-control (first ctl-nodes) :in-bus1))))))
+      nodes))))
+
+(defn fx-param!
+  "Set fx parameter(s). Pass values as a vector for multiple channels."
+  [name fx-node pname value]
+  (let [nodes (if (vector? fx-node) fx-node [fx-node])
+        vals  (if (vector? value) value [value])]
+    (util/single (dorun (map
+      (fn [fx-n val]
+        (let [ctl-nodes (fx-ctl-nodes name fx-n pname)]
+          (if (empty? ctl-nodes)
+            (node-control* fx-n [pname val])
+            (control-bus-set!
+              (int (node-get-control (first ctl-nodes) :in-bus1))
+              val))))
+      nodes vals)))))
+
+(defn fx-ctl-add!
+  "Add a control bus to an fx parameter."
+  [name fx-node pname bus]
+  (let [nodes (if (vector? fx-node) fx-node [fx-node])]
+    (util/single (doall (map
+      (fn [fx-n]
+        (let [ctl-nodes (fx-ctl-nodes name fx-n pname)
+              in-bus1   (if (empty? ctl-nodes)
+                          (let [b (bus/control)]
+                            (control-bus-set! b (fx-param name fx-n pname))
+                            b)
+                          (node-get-control (last ctl-nodes) :out-bus))
+              out-bus   (bus/control)
+              ctl-node  (control/mix
+                          [:tail (groups/control)]
+                          :in-bus1 in-bus1
+                          :in-bus2 bus
+                          :out-bus out-bus)]
+          (node-map-controls* fx-n [pname (int (bus/bus-id out-bus))])
+          (swap! fx-ctl* update-in [name fx-n pname]
+            #(into (if (nil? %) [] %) [ctl-node]))
+          ctl-node))
+      nodes)))))
+
+(defn fx-ctl-remove!
+  "Remove a control node from an instrument parameter."
+  [name fx-node pname ctl-node]
+  (let [nodes  (if (vector? fx-node) fx-node [fx-node])
+        nodes2 (if (vector? ctl-node) ctl-node [ctl-node])]
+    (util/single (dorun (map (fn [fx-n ctl-n]
+      (let [in-bus1   (node-get-control ctl-n "in-bus1")
+            out-bus   (node-get-control ctl-n "out-bus")
+            ctl-nodes (fx-ctl-nodes name fx-n pname)
+            index     (.indexOf ctl-nodes ctl-n)]
+        (if (< (+ index 1) (count ctl-nodes))
+          (let [next-node (get ctl-nodes (+ index 1))]
+            (node-control* next-node ["in-bus1" (int in-bus1)]))
+          (node-map-controls* fx-n [pname (int in-bus1)]))
+        (swap! fx-ctl* update-in [name fx-n pname]
+          #(into [] (remove #{ctl-n} %)))
+        (when (empty? (fx-ctl-nodes name fx-n pname))
+          (fx-param! name fx-n pname (control-bus-get (int in-bus1)))
+          (bus/free-control-id in-bus1))
+        (node-free* ctl-n)
+        (bus/free-control-id out-bus)
+        nil))
+      nodes nodes2)))))
+
+(defn fx-ctl-clear!
+  "Clear all control nodes from an instrument parameter."
+  [name fx-node pname]
+  (dorun (map
+    (fn [fx-n]
+      (dorun (map
+        #(fx-ctl-remove! name fx-n pname %)
+        (fx-ctl-nodes name fx-n pname))))
+    (if (vector? fx-node) fx-node [fx-node]))))
 
 (defn fx-in
   "Get fx input busses."
-  ([name] (reduce #(into %1 (fx-in name (:node %2))) [] (fx-get name)))
+  ([name] (reduce #(into %1 (fx-in name %2)) [] (fx-nodes name)))
   ([name fx-node]
    (let [ugens    (:ugens (:sdef (:synth (fx-get name fx-node))))
          ugens-in (filter #(= (:name %) "In") ugens)
@@ -128,13 +326,6 @@
   [name fx-node]
   (.indexOf (fx-get name) (fx-get name fx-node)))
 
-(defn fx-param
-  "Get fx parameter(s)."
-  [name fx-node pname]
-  (if (vector? fx-node)
-    (into [] (map #(node-get-control % pname) fx-node))
-    (node-get-control fx-node pname)))
-
 (defn fx-move-before!
   "Move fx before on instrument."
   [name fx-node]
@@ -142,12 +333,11 @@
         before (dec index)]
     (when (and (>= index 1) (< index (count (fx-get name))))
       (swap! fx-map* update-in [name] util/swap index before)
-      (let [other-node (:node ((fx-get name) index))]
-        (if (vector? fx-node)
-          (dorun (map
-                   #(node-place* % :before (first other-node))
-                   fx-node))
-          (node-place* fx-node :before other-node))))))
+      (let [other-node (:node ((fx-get name) index))
+            nodes (if (vector? fx-node) fx-node [fx-node])]
+        (dorun (map
+          #(node-place* % :before (first other-node))
+          nodes))))))
 
 (defn fx-move-after!
   "Move fx after on instrument."
@@ -156,12 +346,11 @@
         after (inc index)]
     (when (and (>= index 0) (< index (dec (count (fx-get name)))))
       (swap! fx-map* update-in [name] util/swap index after)
-      (let [other-node (:node ((fx-get name) index))]
-        (if (vector? fx-node)
-          (dorun (map
-                   #(node-place* % :after (last other-node))
-                   (reverse fx-node)))
-          (node-place* fx-node :after other-node))))))
+      (let [other-node (:node ((fx-get name) index))
+            nodes (if (vector? fx-node) fx-node [fx-node])]
+        (dorun (map
+          #(node-place* % :after (last other-node))
+          (reverse nodes)))))))
 
 (defn inst-io-swap!
   "Update the input/output info for an instrument."
@@ -196,7 +385,7 @@
                       clojure.lang.PersistentQueue/EMPTY
                       (filter #(empty? (:out (get io-bus %))) (keys io-bus)))
         dummy-group (groups/audio-dummy)]
-    (swap! node-order* (constantly (distinct
+    (swap! node-order* (constantly (into [] (distinct
       (loop [i-map  io-inst
              b-map  io-bus
              n      (peek sinks)
@@ -214,7 +403,7 @@
           (if (or s f)
             (let [q-new (reduce #(conj %1 %2) queue in-vec)]
               (recur i-new b-new (peek q-new) (pop q-new) (conj sorted n)))
-            (conj sorted n)))))))))
+            (if n (conj sorted n) sorted))))))))))
 
 (defn node-order
   "Get the order of nodes. Must call sort-node-tree beforehand."
@@ -238,6 +427,25 @@
     (inst-io-swap! name)
     (sort-node-tree)))
 
+(defn- sdef-set-bus
+  [sdef bus]
+  (update
+    (update sdef :constants #(conj (take (- (count %) 1) %) bus))
+    :ugens
+    (fn [u]
+      (concat
+        (take (- (count u) 1) u)
+        [(update
+          (update
+            (update
+              (last u)
+              :arg-map
+              #(assoc % :bus (int bus)))
+            :orig-args
+            #(conj (rest %) (int bus)))
+          :args
+          #(conj (rest %) bus))]))))
+
 (defn inst-add!
   "Duplicate an new instrument.
    Usage: (inst-add! \"mono-pass\" \"example\")"
@@ -247,7 +455,7 @@
   (ensure-connected!)
   (let [old-name# old-name
        new-name# new-name
-       old-inst# (get (:instruments @studio*) old-name#)
+       old-inst# (get (inst-library) old-name#)
        n-chans#  (:n-chans old-inst#)
        inst-bus# (audio-bus n-chans#)
        container-group# (with-server-sync
@@ -269,7 +477,10 @@
                               [:tail container-group#]
                               :in-bus inst-bus#)
 
-       sdef#      (:sdef old-inst#)
+       sdef#      (update
+                    (sdef-set-bus (:sdef old-inst#) (bus/bus-id inst-bus#))
+                    :name
+                    #(str % "-" new-name#))
        arg-names# (:args old-inst#)
        params#    (map #(assoc % :value (atom (:default %)))
                        (:params old-inst#))
@@ -284,22 +495,65 @@
                     {:overtone.helpers.lib/to-string #(str (name (:type %))
                                                            ":"
                                                            (:name %))})]
-   (event :inst-add :inst inst#)
+   (load-synthdef sdef#)
    (swap! inst-map* assoc new-name# inst#)
+   (swap! inst-ctl* assoc new-name# {})
+   (swap! inst-nodes* assoc new-name# [])
    (swap! fx-map* assoc new-name# [])
+   (swap! fx-ctl* assoc new-name# {})
    (inst-io-swap! new-name#)
    (sort-node-tree)
    inst#))
+
+ (defn inst-rename!
+   "Rename an instrument."
+   [name new-name]
+   (when (inst-get new-name)
+     (throw (Exception. (str "Instument already exists: " new-name))))
+   (let [inst       (inst-get name)
+         inst-ctl   (get @inst-ctl* name)
+         inst-nodes (get @inst-nodes* name)
+         fx         (fx-get name)
+         fx-ctl     (get @fx-ctl* name)
+         io         (get (inst-io) name)
+         index      (.indexOf (node-order) name)]
+     (swap! inst-map* dissoc name)
+     (swap! inst-ctl* dissoc name)
+     (swap! inst-nodes* dissoc name)
+     (swap! fx-map* dissoc name)
+     (swap! fx-ctl* dissoc name)
+     (swap! inst-io* dissoc name)
+     (swap! inst-map* assoc new-name inst)
+     (swap! inst-ctl* assoc new-name inst-ctl)
+     (swap! inst-nodes* assoc new-name inst-nodes)
+     (swap! fx-map* assoc new-name fx)
+     (swap! fx-ctl* assoc new-name fx-ctl)
+     (swap! inst-io* assoc new-name io)
+     (swap! node-order* #(assoc % index new-name))
+     inst))
 
 (defn inst-remove!
   "Remove an instrument."
   [name]
   (let [inst (inst-get name)]
+    (dorun (map
+      (fn [fx-node]
+        (dorun (map
+          (partial fx-ctl-clear! name fx-node)
+          (fx-params name fx-node))))
+      (fx-nodes name)))
+    (dorun (map
+      (partial inst-ctl-clear! name)
+      (inst-params name)))
+    (swap! inst-map* dissoc name)
+    (swap! inst-ctl* dissoc name)
+    (swap! inst-nodes* dissoc name)
+    (swap! fx-map* dissoc name)
+    (swap! fx-ctl* dissoc name)
+    (swap! inst-io* dissoc name)
     (bus/free (:bus inst))
     (node-free* (:group inst))
-    (swap! inst-map* dissoc name)
-    (swap! fx-map* dissoc name)
-    (swap! inst-io* dissoc name)
+    (sort-node-tree)
     nil))
 
 (defn fx-add!
@@ -315,20 +569,14 @@
 (defn fx-remove!
   "Remove an instrument's fx."
   [name fx-node]
+  (dorun (map
+    (partial fx-ctl-clear! name fx-node)
+    (fx-params name fx-node)))
   (swap! fx-map* update-in [name] (partial remove #(= (:node %) fx-node)))
-  (if (vector? fx-node)
-    (dorun (map #(node-free* %) fx-node)) (node-free* fx-node))
+  (dorun (map #(node-free* %) (if (vector? fx-node) fx-node [fx-node])))
   (inst-io-swap! name)
+  (sort-node-tree)
   nil)
-
-(defn fx-param!
-  "Set fx parameter(s). Pass values as a vector for multiple channels."
-  [name fx-node pname values]
-  (if (vector? fx-node)
-    (dorun (map #(ctl %1 pname %2) fx-node values))
-    (ctl fx-node pname values))
-  (inst-io-swap! name)
-  (sort-node-tree))
 
 (defn inst-add-to-bus!
   "Add an instrument and connect it to input and output busses."
@@ -384,17 +632,46 @@
                     (inst-in! new-name n))
        :else (throw (Exception. (str "Unknown type: " n)))))))
 
-(defn bus-clean
+(defn inst-node-add!
+  "Add node for an instrument."
+  [name]
+  (let [inst-node ((inst-get name))]
+    (dorun (map
+      #(when-let [ctl-nodes (seq (inst-ctl-nodes name %))]
+         (node-map-controls*
+           inst-node
+           [% (int (node-get-control (last ctl-nodes) :out-bus))]))
+      (inst-params name)))
+    (swap! inst-nodes* update name
+      #(into % [inst-node]))
+    inst-node))
+
+(defn inst-node-remove!
+  "Remove node for an instrument."
+  [name inst-node]
+  (node-free* inst-node)
+  (swap! inst-nodes* update name
+    #(into [] (remove #{inst-node} %)))
+  nil)
+
+(defn inst-node-clear!
+  "Clear all nodes for an instrument."
+  [name]
+  (dorun (map (partial inst-node-remove! name) (inst-nodes name))))
+
+(defn clear-busses
   "Free all unused busses."
   []
-  (dorun
-    (map bus/free-audio-id
-      (remove #(contains? (into #{} (keys (bus-io))) %)
-        (drop (:n-channels bus/hardware) @bus/bus-audio*)))))
+  (dorun (map
+    bus/free-audio-id
+    (remove
+      #(contains? (into #{} (keys (bus-io))) %)
+      (drop (:n-channels bus/hardware) @bus/bus-audio*)))))
 
 (defn wipe
   "Clear all audio processing."
   []
   (dorun (map inst-remove! (inst-list)))
-  (dorun
-    (map bus/free-audio-id (drop (:n-channels bus/hardware) @bus/bus-audio*))))
+  (dorun (map
+    bus/free-audio-id
+    (drop (:n-channels bus/hardware) @bus/bus-audio*))))

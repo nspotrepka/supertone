@@ -54,6 +54,11 @@
     :bus-control (or @bus-control* (:bus-control s))
     }))
 
+(defn bus-audio
+  "Get the list of audio busses."
+  []
+  @bus-audio*)
+
 (defn audio
   "Allocate an audio bus."
   ([] (audio 1))
@@ -85,6 +90,7 @@
 (defn free
   "Free a bus."
   [bus]
+  (swap! bus-control* (partial remove (into #{} (bus-range bus))))
   (free-bus bus))
 
 (defn free-audio-id

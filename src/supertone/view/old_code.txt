@@ -1,0 +1,316 @@
+(ns supertone.gui.bus
+  (:require [quil.core :as q])
+  (:use supertone.gui.util))
+
+(def BUS_TAB_NAME "busses")
+(def sidebar-width 200)
+(def scroll-y* (atom 0))
+
+(defn bus-tab
+  [g]
+  (add-tab g BUS_TAB_NAME)
+    BUS_TAB_NAME)
+
+(defn draw-bus-tab
+  []
+  (q/push-matrix)
+  (q/translate 0 @scroll-y*)
+  (q/rect 44 44 128 128)
+  (q/pop-matrix))
+
+(defn mouse-wheel-bus-tab
+  [rotation]
+    (reset! scroll-y* (+ @scroll-y* (* SCROLL_SPEED rotation))))
+
+
+
+
+
+(ns supertone.gui.core
+  (:require [quil.core :as q])
+  (:use [quil.applet :only [current-applet applet-close]])
+  (:import [controlP5 ControlEvent Controller ControllerGroup ControlP5 ControlFont ControlKey Textlabel])
+  (:use supertone.gui.util)
+  (:use supertone.gui.theme)
+  (:use supertone.gui.icons)
+  (:use supertone.gui.bus))
+
+(defrecord UserInterface [applet cp5 font cp5-font])
+
+(def gui* (atom (map->UserInterface {})))
+
+(def DEFAULT_TAB_NAME "default")
+
+(defn setup-gui
+  []
+  (q/no-smooth)
+  (q/frame-rate 60)
+  (reset! gui* (assoc @gui* :applet (current-applet)))
+  (reset! gui* (assoc @gui* :cp5 (ControlP5. (:applet @gui*))))
+  (reset! gui* (assoc @gui* :font (q/create-font "pixel_operator/PixelOperator.ttf" 16 true)))
+  (reset! gui* (assoc @gui* :cp5-font (ControlFont. (:font @gui*) 16)))
+  (-> (:cp5 @gui*)
+    (.getWindow)
+    (.setPositionOfTabs 0 LINE_HEIGHT))
+  (-> (:cp5 @gui*)
+    (.addTextlabel "supertone")
+    (.setFont (:cp5-font @gui*))
+    (.setText "Supertone v0.1.0")
+    (.setPosition 0 0)
+    (.moveTo "global"))
+  (-> (:cp5 @gui*)
+    (.getTab "default")
+    (.setLabel "about")
+    (.setHeight (- LINE_HEIGHT 1))
+    (.getCaptionLabel)
+    (.setFont (:cp5-font @gui*))
+    (.getStyle)
+    (.marginTop)
+    (set! -2))
+  (bus-tab @gui*)
+  (apply-theme @gui*))
+
+(defn draw-gui
+  []
+  (q/background (get-color :b0))
+  (when (tab-active? @gui* BUS_TAB_NAME) (draw-bus-tab)))
+
+(defn key-pressed-gui
+  []
+  (case (q/raw-key)
+    \1 (show-tab @gui* DEFAULT_TAB_NAME)
+    \2 (show-tab @gui* BUS_TAB_NAME)
+    q/CODED (case (q/key-code)
+      (set! (.key (quil.applet/current-applet)) (char 0))
+      nil)
+    nil))
+
+(defn mouse-wheel-gui
+  [rotation]
+  (when (tab-active? @gui* BUS_TAB_NAME) (mouse-wheel-bus-tab rotation)))
+
+(defn open-gui
+  []
+  (dispose (:applet @gui*))
+  (q/sketch
+    :title "Supertone"
+    :size [1280 720]
+    :features [:resizable]
+    :setup setup-gui
+    :draw draw-gui
+    :key-pressed key-pressed-gui
+    :mouse-wheel mouse-wheel-gui))
+
+
+
+
+
+
+
+
+
+(ns supertone.gui.icons
+  (:require [quil.core :as q]))
+
+(defn icon-rarrow
+  [x y]
+  (q/begin-shape)
+  (q/vertex (+ x 7) (+ y 5))
+  (q/vertex (+ x 12) (+ y 10))
+  (q/vertex (+ x 7) (+ y 15))
+  (q/end-shape :close))
+
+(defn icon-square
+  [x y]
+  (q/begin-shape)
+  (q/vertex (+ x 5) (+ y 5))
+  (q/vertex (+ x 14) (+ y 5))
+  (q/vertex (+ x 14) (+ y 14))
+  (q/vertex (+ x 5) (+ y 14))
+  (q/end-shape :close))
+
+
+
+
+
+
+
+
+
+
+
+
+(ns supertone.gui.inst
+  (:require [quil.core :as q])
+  (:use supertone.gui.util))
+
+(comment
+
+(defn node-sliders
+  [group y params name]
+  (let [p (first params)
+        r (rest params)]
+    (-> @gui-cp5*
+      (.addSlider (str name "/" p))
+      (.setBroadcast false)
+      (.setPosition 0 y)
+      (.setSize 200 20)
+      (.setRange 100 300)
+      (.moveTo group)
+      (.getCaptionLabel)
+      (.setText p))
+    (when (seq r) (node-sliders group (+ 20 y) r name))))
+
+(defn node-group
+  [node name]
+  (let [g (-> @gui-cp5* (.addGroup name))]
+    (node-sliders g 0 (:args node) name)
+    g))
+
+(defn inst-tab
+  []
+  (add-tab "instruments")
+  (reset! node-accordion*
+    (-> @gui-cp5*
+      (.addAccordion "node-accordion")
+      (.setPosition 20 42)
+      (.moveTo "instruments")))
+  (doseq [inst (sort-by :name (vals (:instruments @studio*)))]
+    (let [name (get-name inst)
+          g (node-group inst name)]
+      (-> g
+        (.setWidth 40)
+        (.setHeight 20)
+        (.getCaptionLabel)
+        (.setFont @font-cp5*))
+      (.addItem @node-accordion* g)
+      (assoc @node-gui* name g)
+      (doseq [fx (:children (node-tree (:fx-group inst)))]
+        (let [name2 (str (:name inst) "/" (get-name fx))
+              g2 (node-group fx name2)]
+          (-> g2
+            (.setHeight 20)
+            (.getCaptionLabel)
+            (.setWidth 600)
+            (.setFont @font-cp5*))
+          (assoc @node-gui* name2 g2)
+          (.addItem @node-accordion* g2))))))
+
+(defn inst-tab-draw
+  [g]
+  (when (.isActive (.getTab @gui-cp5* "instruments"))
+    (q/fill (get-color :t1))
+    (q/no-stroke)
+    (icon-rarrow 0 63)
+    (icon-square 0 42)))
+
+  )
+
+
+
+
+
+
+
+
+
+
+
+(ns supertone.gui.theme
+  (:require [quil.core :as q]))
+
+(defstruct theme :b0 :b1 :b2 :f1 :t1 :t2 :s1 :s2)
+
+(def themes {
+  :default (struct theme [240 240 255] [212 212 255] [255 255 255] [200 200 255] [96 96 255] [24 24 32])
+})
+
+(def palette (:default themes))
+
+(defn color-rgba
+  ([w] (color-rgba w w w 255))
+  ([w a] (color-rgba w w w a))
+  ([r g b] (color-rgba r g b 255))
+  ([r g b a] (bit-or (bit-shift-left a 24) (bit-shift-left r 16) (bit-shift-left g 8) b)))
+
+(defn color [c] (apply color-rgba c))
+
+(defn get-color [s] (color (s palette)))
+
+(defn set-theme
+  [t]
+  (def palette (t themes)))
+
+(defn apply-theme
+  [g]
+  (let [cp5 (:cp5 g)]
+    (.setColorActive cp5 (get-color :b2))
+    (.setColorBackground cp5 (get-color :b1))
+    (.setColorCaptionLabel cp5 (get-color :t1))
+    (.setColorForeground cp5 (get-color :f1))
+    (.setColorValueLabel cp5 (get-color :t2))))
+
+
+
+
+
+
+
+
+
+
+(ns supertone.gui.util
+  (:require [quil.core :as q]))
+
+(def LINE_HEIGHT 21)
+(def HEADER_HEIGHT 42)
+(def TEXT_OFFSET_X 4)
+(def TEXT_OFFSET_Y 15)
+(def SCROLL_SPEED 4)
+
+(defn dispose
+  "Close and dispose of a sketch."
+  [applet]
+  (when applet
+    (let [frame (.frame applet)]
+    (.setVisible frame false)
+    (.dispose frame))))
+
+(defn get-width
+  "Get the width of a sketch."
+  [g]
+  (get (:size (meta (:applet g))) 0))
+
+(defn get-height
+  "Get the height of a sketch."
+  [g]
+  (get (:size (meta (:applet g))) 1))
+
+(defn add-tab
+  "Create a tab."
+  [g name]
+  (-> (:cp5 g)
+    (.addTab name)
+    (.setHeight (- LINE_HEIGHT 1))
+    (.getCaptionLabel)
+    (.setFont (:cp5-font g))
+    (.getStyle)
+    (.marginTop)
+    (set! -2)))
+
+(defn tab-active?
+  "Check if a tab is active."
+  [g name]
+  (.isActive (.getTab (:cp5 g) name)))
+
+(defn show-tab
+  "Show a tab of a particular name."
+  [g name]
+  (-> (:cp5 g)
+    (.getTab name)
+    (.bringToFront)))
+
+(defn draw-text
+  "Draw text with offset."
+  [s x y]
+  (q/text s (+ x TEXT_OFFSET_X) (+ y TEXT_OFFSET_Y)))

@@ -40,6 +40,9 @@
 (defn first-of [coll]
   (if (vector? coll) (first coll) coll))
 
+(defn single [x]
+  (if (= (count x) 1) (first x) x))
+
 (defn map-invert
   "Get all the input/output instruments to/from a bus."
   [io-map]
