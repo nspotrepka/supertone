@@ -10,12 +10,12 @@
 (defn init
   [s]
   (map->Buffer {
-    :buffer-vec   (util/swap-or buffer-vec* (:buffer-vec s) [])}))
+    :buffer-vec (util/swap-or buffer-vec* (:buffer-vec s) [])}))
 
 (defn dispose
   [s]
   (map->Audio {
-    :buffer-vec   (or @buffer-vec* (:buffer-vec s))}))
+    :buffer-vec (or @buffer-vec* (:buffer-vec s))}))
 
 ;; add
 ;; load
