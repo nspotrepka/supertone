@@ -80,11 +80,6 @@
   [name]
   (get @inst-map* name))
 
-(defn inst-params
-  "Get instrument parameter names."
-  [name]
-  (:args (inst-get name)))
-
 (defn inst-ctl-nodes
   "Get the list of synths controlling an instrument parameter."
   [name pname]
@@ -99,13 +94,20 @@
   [name pname]
   (first (filter #(= (:name %) pname) (:params (inst-get name)))))
 
+(defn inst-params
+  "Get instrument parameter names."
+  [name]
+  (remove
+    #{"in-bus"}
+    (:args (inst-get name))))
+
 (defn inst-param
   "Get instrument parameter."
   [name pname]
   (let [a         (:value (inst-param-all name pname))
         ctl-nodes (inst-ctl-nodes name pname)]
     (if (empty? ctl-nodes)
-      (if (nil? a) nil @a)
+      (if (nil? a) nil (float @a))
       (control-bus-get
         (int (node-get-control (first ctl-nodes) :in-bus1))))))
 
@@ -225,79 +227,6 @@
               (int (node-get-control (first ctl-nodes) :in-bus1))))))
       nodes))))
 
-(defn fx-param!
-  "Set fx parameter(s). Pass values as a vector for multiple channels."
-  [name fx-node pname value]
-  (let [nodes (if (vector? fx-node) fx-node [fx-node])
-        vals  (if (vector? value) value [value])]
-    (util/single (dorun (map
-      (fn [fx-n val]
-        (let [ctl-nodes (fx-ctl-nodes name fx-n pname)]
-          (if (empty? ctl-nodes)
-            (node-control* fx-n [pname val])
-            (control-bus-set!
-              (int (node-get-control (first ctl-nodes) :in-bus1))
-              val))))
-      nodes vals)))))
-
-(defn fx-ctl-add!
-  "Add a control bus to an fx parameter."
-  [name fx-node pname bus]
-  (let [nodes (if (vector? fx-node) fx-node [fx-node])]
-    (util/single (doall (map
-      (fn [fx-n]
-        (let [ctl-nodes (fx-ctl-nodes name fx-n pname)
-              in-bus1   (if (empty? ctl-nodes)
-                          (let [b (bus/control)]
-                            (control-bus-set! b (fx-param name fx-n pname))
-                            b)
-                          (node-get-control (last ctl-nodes) :out-bus))
-              out-bus   (bus/control)
-              ctl-node  (control/mix
-                          [:tail (groups/control)]
-                          :in-bus1 in-bus1
-                          :in-bus2 bus
-                          :out-bus out-bus)]
-          (node-map-controls* fx-n [pname (int (bus/bus-id out-bus))])
-          (swap! fx-ctl* update-in [name fx-n pname]
-            #(into (if (nil? %) [] %) [ctl-node]))
-          ctl-node))
-      nodes)))))
-
-(defn fx-ctl-remove!
-  "Remove a control node from an instrument parameter."
-  [name fx-node pname ctl-node]
-  (let [nodes  (if (vector? fx-node) fx-node [fx-node])
-        nodes2 (if (vector? ctl-node) ctl-node [ctl-node])]
-    (util/single (dorun (map (fn [fx-n ctl-n]
-      (let [in-bus1   (node-get-control ctl-n "in-bus1")
-            out-bus   (node-get-control ctl-n "out-bus")
-            ctl-nodes (fx-ctl-nodes name fx-n pname)
-            index     (.indexOf ctl-nodes ctl-n)]
-        (if (< (+ index 1) (count ctl-nodes))
-          (let [next-node (get ctl-nodes (+ index 1))]
-            (node-control* next-node ["in-bus1" (int in-bus1)]))
-          (node-map-controls* fx-n [pname (int in-bus1)]))
-        (swap! fx-ctl* update-in [name fx-n pname]
-          #(into [] (remove #{ctl-n} %)))
-        (when (empty? (fx-ctl-nodes name fx-n pname))
-          (fx-param! name fx-n pname (control-bus-get (int in-bus1)))
-          (bus/free-control-id in-bus1))
-        (node-free* ctl-n)
-        (bus/free-control-id out-bus)
-        nil))
-      nodes nodes2)))))
-
-(defn fx-ctl-clear!
-  "Clear all control nodes from an instrument parameter."
-  [name fx-node pname]
-  (dorun (map
-    (fn [fx-n]
-      (dorun (map
-        #(fx-ctl-remove! name fx-n pname %)
-        (fx-ctl-nodes name fx-n pname))))
-    (if (vector? fx-node) fx-node [fx-node]))))
-
 (defn fx-in
   "Get fx input busses."
   ([name] (reduce #(into %1 (fx-in name %2)) [] (fx-nodes name)))
@@ -306,15 +235,16 @@
          ugens-in (filter #(= (:name %) "In") ugens)
          arg-maps (map #(:arg-map %) ugens-in)
          busses   (flatten (map
-                    #(bus/float-range
-                      (node-get-control
-                        (util/first-of fx-node)
-                        (:name (:bus %)))
-                      (:num-channels %))
+                    #(map
+                      (fn [fx-n]
+                        (bus/float-range
+                          (node-get-control fx-n (:name (:bus %)))
+                          (:num-channels %)))
+                      (if (vector? fx-node) fx-node [fx-node]))
                     arg-maps))
          external (remove (set (bus/bus-range (:bus (inst-get name)))) busses)
-         f        (map #(float %) external)]
-     (into [] f))))
+         f        (set (map #(float %) external))]
+     (into [] (sort f)))))
 
 (defn fx-out
   "Get fx output busses."
@@ -362,9 +292,10 @@
         io      {:in in-vec :out out-vec}
         fx-in   (fx-in name)
         fx-out  (fx-out name)
-        io-all  (update-in (update-in io [:in] into fx-in) [:out] into fx-out)]
+        io-all  (update-in (update-in io [:in] into fx-in) [:out] into fx-out)
+        io-now  (get @inst-io* name)]
     (swap! inst-io* assoc name io-all)
-    io-all))
+    (not= io-now io-all)))
 
 (defn inst-io
   "Get all the input/output busses to/from an instrument."
@@ -426,6 +357,81 @@
     (ctl (:mixer (inst-get name)) :out-bus bus2)
     (inst-io-swap! name)
     (sort-node-tree)))
+
+(defn fx-param!
+  "Set fx parameter(s). Pass values as a vector for multiple channels."
+  [name fx-node pname value]
+  (let [nodes (if (vector? fx-node) fx-node [fx-node])
+        vals  (if (vector? value) value [value])]
+    (util/single (dorun (map
+      (fn [fx-n val]
+        (let [ctl-nodes (fx-ctl-nodes name fx-n pname)]
+          (if (empty? ctl-nodes)
+            (node-control* fx-n [pname val])
+            (control-bus-set!
+              (int (node-get-control (first ctl-nodes) :in-bus1))
+              val))))
+      nodes vals))))
+    (when (inst-io-swap! name)
+      (sort-node-tree)))
+
+(defn fx-ctl-add!
+  "Add a control bus to an fx parameter."
+  [name fx-node pname bus]
+  (let [nodes (if (vector? fx-node) fx-node [fx-node])]
+    (util/single (doall (map
+      (fn [fx-n]
+        (let [ctl-nodes (fx-ctl-nodes name fx-n pname)
+              in-bus1   (if (empty? ctl-nodes)
+                          (let [b (bus/control)]
+                            (control-bus-set! b (fx-param name fx-n pname))
+                            b)
+                          (node-get-control (last ctl-nodes) :out-bus))
+              out-bus   (bus/control)
+              ctl-node  (control/mix
+                          [:tail (groups/control)]
+                          :in-bus1 in-bus1
+                          :in-bus2 bus
+                          :out-bus out-bus)]
+          (node-map-controls* fx-n [pname (int (bus/bus-id out-bus))])
+          (swap! fx-ctl* update-in [name fx-n pname]
+            #(into (if (nil? %) [] %) [ctl-node]))
+          ctl-node))
+      nodes)))))
+
+(defn fx-ctl-remove!
+  "Remove a control node from an instrument parameter."
+  [name fx-node pname ctl-node]
+  (let [nodes  (if (vector? fx-node) fx-node [fx-node])
+        nodes2 (if (vector? ctl-node) ctl-node [ctl-node])]
+    (util/single (dorun (map (fn [fx-n ctl-n]
+      (let [in-bus1   (node-get-control ctl-n "in-bus1")
+            out-bus   (node-get-control ctl-n "out-bus")
+            ctl-nodes (fx-ctl-nodes name fx-n pname)
+            index     (.indexOf ctl-nodes ctl-n)]
+        (if (< (+ index 1) (count ctl-nodes))
+          (let [next-node (get ctl-nodes (+ index 1))]
+            (node-control* next-node ["in-bus1" (int in-bus1)]))
+          (node-map-controls* fx-n [pname (int in-bus1)]))
+        (swap! fx-ctl* update-in [name fx-n pname]
+          #(into [] (remove #{ctl-n} %)))
+        (when (empty? (fx-ctl-nodes name fx-n pname))
+          (fx-param! name fx-n pname (control-bus-get (int in-bus1)))
+          (bus/free-control-id in-bus1))
+        (node-free* ctl-n)
+        (bus/free-control-id out-bus)
+        nil))
+      nodes nodes2)))))
+
+(defn fx-ctl-clear!
+  "Clear all control nodes from an instrument parameter."
+  [name fx-node pname]
+  (dorun (map
+    (fn [fx-n]
+      (dorun (map
+        #(fx-ctl-remove! name fx-n pname %)
+        (fx-ctl-nodes name fx-n pname))))
+    (if (vector? fx-node) fx-node [fx-node]))))
 
 (defn- sdef-set-bus
   [sdef bus]
@@ -553,7 +559,6 @@
     (swap! inst-io* dissoc name)
     (bus/free (:bus inst))
     (node-free* (:group inst))
-    (sort-node-tree)
     nil))
 
 (defn fx-add!
@@ -562,8 +567,8 @@
   (let [inst (inst-get name)
         fx-node (inst-fx! inst fx)]
     (swap! fx-map* update-in [name] conj {:node fx-node :synth fx})
-    (inst-io-swap! name)
-    (sort-node-tree)
+    (when (inst-io-swap! name)
+      (sort-node-tree))
     fx-node))
 
 (defn fx-remove!
@@ -575,7 +580,6 @@
   (swap! fx-map* update-in [name] (partial remove #(= (:node %) fx-node)))
   (dorun (map #(node-free* %) (if (vector? fx-node) fx-node [fx-node])))
   (inst-io-swap! name)
-  (sort-node-tree)
   nil)
 
 (defn inst-add-to-bus!
