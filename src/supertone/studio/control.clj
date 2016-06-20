@@ -1,6 +1,7 @@
 (ns supertone.studio.control
   (:require [overtone.libs.event     :only [event]
                                      :refer :all]
+            [overtone.sc.bus         :refer :all]
             [overtone.sc.node        :refer :all]
             [overtone.sc.ugens       :refer :all]
             [overtone.sc.synth       :refer :all]
@@ -8,19 +9,22 @@
             [supertone.studio.groups :as groups]
             [supertone.studio.bus    :as bus]))
 
-(def nil-id -1000)
+(def nil-id -2000)
 
 (defsynth mix
   [in-bus1 nil-id
    in-bus2 nil-id
    out-bus nil-id
    amt     0]
-  (out:kr out-bus (+ (in:kr in-bus1) (* (in:kr in-bus2) amt))))
+  (out:kr
+    out-bus
+    (+
+      (in:kr in-bus1)
+      (* (in:kr in-bus2) amt))))
 
 (defrecord Control [ctl-map])
 
 (def ctl-map* (atom nil))
-(def node-order* (atom nil))
 
 (defn init
   [s]
@@ -35,11 +39,8 @@
 (defn ctl-library
   "List the control synths available to add."
   []
-  (->> *ns*
-    (ns-map)
-    (vals)
-    (filter #(= (type %) :overtone.sc.synth/synth))
-    (sort-by str)))
+  (->> (util/list-synth)
+    (filter #(= (type %) :overtone.sc.synth/synth))))
 
 (defn ctl-list
   "List control busses."
@@ -61,44 +62,6 @@
   [bus pname value]
   (ctl (ctl-get bus) pname value))
 
-(defn bus-io
-  "Get all the input/output control nodes to/from a bus."
-  []
-  @ctl-map*)
-
-(defn ctl-io
-  "Get all the input/output busses to/from a control node."
-  []
-  (util/map-invert (bus-io)))
-
-(defn sort-node-tree
-  "Sort the control nodes in the node tree."
-  []
-  (let [io-bus      (bus-io)
-        io-ctl      (util/map-invert io-bus)
-        sinks       (into
-                      clojure.lang.PersistentQueue/EMPTY
-                      (filter #(nil? (:out (get io-bus %))) (keys io-bus)))
-        dummy-group (groups/control-dummy)]
-    (swap! node-order* (constantly (into [] (distinct
-      (loop [c-map  io-ctl
-             b-map  io-bus
-             n      (peek sinks)
-             queue  (pop sinks)
-             sorted '()]
-        (let [s      (node? n)
-              f      (float? n)
-              in-vec (cond
-                       s (get-in c-map [n :in])
-                       f (get-in b-map [n :in])
-                       :else nil)
-              i-new  (if s (assoc-in c-map [n :in] nil) c-map)
-              b-new  (if f (assoc-in b-map [n :in] nil) b-map)]
-          (if (or s f)
-            (let [q-new (reduce #(conj %1 %2) queue in-vec)]
-              (recur i-new b-new (peek q-new) (pop q-new) (conj sorted n)))
-            (if n (conj sorted n) sorted))))))))))
-
 (defn ctl-add!
   "Add a control. Control synth must have out-bus param."
   [s & args]
@@ -115,3 +78,49 @@
   (bus/free bus)
   (swap! ctl-map* dissoc bus)
   nil)
+
+(defn node-map-ctl
+  "Map a control bus to the parameters of a collection of nodes."
+  [nodes param bus]
+  (dorun (map
+    #(node-map-controls* % [param (int bus)])
+    nodes)))
+
+(defn mix-add!
+  "Add a control bus to an instrument parameter."
+  [ctl-atom id bus ctl-nodes audio-nodes param-get-fn]
+  (let [in-bus1  (if (empty? ctl-nodes)
+                   (let [b (bus/control)]
+                     (control-bus-set! b (apply param-get-fn id))
+                     b)
+                   (node-get-control (last ctl-nodes) :out-bus))
+        out-bus  (bus/control)
+        ctl-node (mix
+                   [:tail (groups/control)]
+                   :in-bus1 in-bus1
+                   :in-bus2 bus
+                   :out-bus out-bus)]
+    (node-map-ctl audio-nodes (last id) (bus/bus-id out-bus))
+    (swap! ctl-atom update-in id
+      #(into (if (nil? %) [] %) [ctl-node]))
+    ctl-node))
+
+(defn mix-remove!
+  "Remove a control node from an instrument parameter."
+  [ctl-atom id ctl-node ctl-nodes audio-nodes param-get-fn param-set-fn]
+  (let [in-bus1 (node-get-control ctl-node "in-bus1")
+        out-bus (node-get-control ctl-node "out-bus")
+        index   (.indexOf ctl-nodes ctl-node)]
+    (when (>= index 0)
+      (if (< (+ index 1) (count ctl-nodes))
+        (let [next-node (get ctl-nodes (+ index 1))]
+          (node-control* next-node ["in-bus1" (int in-bus1)]))
+        (node-map-ctl audio-nodes (last id) in-bus1))
+      (swap! ctl-atom update-in id
+        #(into [] (remove #{ctl-node} %)))
+      (when (= (count ctl-nodes) 1)
+        (apply param-set-fn (into id [(control-bus-get (int in-bus1))]))
+        (bus/free-control-id in-bus1))
+      (node-free* ctl-node)
+      (bus/free-control-id out-bus))
+    nil))

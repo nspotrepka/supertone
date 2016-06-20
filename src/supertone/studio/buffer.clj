@@ -17,6 +17,8 @@
   (map->Audio {
     :buffer-vec (or @buffer-vec* (:buffer-vec s))}))
 
+(def nil-id -3000)
+
 ;; add
 ;; load
 ;; generate

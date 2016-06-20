@@ -16,6 +16,7 @@
    [supertone.studio.control     :as control]
    [supertone.studio.audio       :as audio]
    [supertone.studio.sequencer   :as sequencer]
+   [supertone.studio.midi        :as midi]
    [supertone.view.gui           :as gui]
    [supertone.midi.beatstep      :as beatstep]
    [supertone.midi.launchpad-mk2 :as launchpad]))
@@ -93,11 +94,17 @@
         b  (control/ctl-add! sineboy :freq 1)
         b2 (control/ctl-add! sineboy :freq 10)
         n  (audio/inst-node-add! "seesaw")
+        x  (audio/inst-param-delta! "seesaw" "freq" 1)
+        y  (audio/inst-param-reset! "seesaw" "freq")
+        z  (audio/inst-param! "seesaw" "freq" 200)
         c  (audio/inst-ctl-add! "seesaw" "freq" b)
         c2 (audio/inst-ctl-add! "seesaw" "freq" b2)]
-    (audio/ctl-amt! c 50)
-    (audio/ctl-amt! c2 10)
-    nil))
+    (audio/inst-ctl-amt-delta "seesaw" "freq" c 1)
+    (audio/inst-ctl-amt-delta "seesaw" "freq" c2 1)
+    (audio/ctl-amt-reset c)
+    (audio/ctl-amt-reset c2)
+    (audio/ctl-amt-set c 50)
+    (audio/ctl-amt-set c2 10)))
 
 (defn f2
   []
@@ -124,20 +131,28 @@
         b  (control/ctl-add! sineboy :freq 1)
         b2 (control/ctl-add! sineboy :freq 30)
         n  (audio/inst-node-add! "dragon")
-        x  (audio/fx-param! "dragon" f "cutoff" 1200)
+        x  (audio/fx-param-delta! "dragon" f "cutoff" 200)
+        y  (audio/fx-param-reset! "dragon" f "cutoff")
+        z  (audio/fx-param! "dragon" f "cutoff" 1200)
         c  (audio/fx-ctl-add! "dragon" f "cutoff" b)
         c2 (audio/fx-ctl-add! "dragon" f "cutoff" b2)]
-    (audio/ctl-amt! c 400)
-    (audio/ctl-amt! c2 200)))
+    (audio/fx-ctl-amt-delta "dragon" f "cutoff" c 400)
+    (audio/fx-ctl-amt-delta "dragon" f "cutoff" c2 200)
+    (audio/ctl-amt-reset c)
+    (audio/ctl-amt-reset c2)
+    (audio/ctl-amt-set c 400)
+    (audio/ctl-amt-set c2 200)))
 
 (defn f5
   []
   (let [i (audio/inst-get "dragon")
-        f (first (audio/fx-nodes "dragon"))]
+        f (audio/fx-nodes "dragon")]
     (audio/fx-param! "dragon" f "cutoff" 600)
-    (dorun (map
-      #(audio/fx-ctl-remove! "dragon" f "cutoff" %)
-      (audio/fx-ctl-nodes "dragon" f "cutoff")))
+    (dorun
+      (map
+        #(audio/fx-ctl-remove! "dragon" % "cutoff"
+          (audio/fx-ctl-nodes "dragon" % "cutoff"))
+        f))
     (audio/fx-param "dragon" f "cutoff")))
 
 (defn f6

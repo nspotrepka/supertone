@@ -1,50 +1,48 @@
 (ns supertone.util)
 
-(defn list-inst
-  "List all instruments."
-  []
-  (->> 'supertone.core
+(defn list-type
+  "List all variables of the specified type"
+  [t]
+  (->> *ns*
     (ns-map)
     (vals)
-    (filter #(= (type %) :overtone.studio.inst/instrument))
+    (filter #(= (type %) t))
     (sort-by str)))
 
 (defn list-synth
   "List all synths."
   []
-  (->> 'supertone.core
-    (ns-map)
-    (vals)
-    (filter #(= (type %) :overtone.sc.synth/synth))
-    (sort-by str)))
+  (list-type :overtone.sc.synth/synth))
 
 (defn list-cgen
   "List all composite generators."
   []
-  (->> 'supertone.core
-    (ns-map)
-    (vals)
-    (filter #(= (type %) :overtone.sc.defcgen/cgen))
-    (sort-by str)))
+  (list-type :overtone.sc.defcgen/cgen))
 
 (defmacro swap-or
-  "Swaps an atom with the first element that is not nil."
+  "Swap an atom with the first argument that is not nil."
   ([x] @x)
   ([x & next]
    `(let [a# ~x]
       (swap! a# #(if % % (or ~@next))))))
 
-(defn swap [v i j]
+(defn swap
+  "Switch two elements in a vector."
+  [v i j]
   (assoc v j (v i) i (v j)))
 
-(defn first-of [coll]
-  (if (vector? coll) (first coll) coll))
+(defn first-of
+  "If v is vector, return first element of v, else return v."
+  [v]
+  (if (vector? v) (first v) v))
 
-(defn single [x]
-  (if (= (count x) 1) (first x) x))
+(defn single
+  "If collection has only one element, return its element."
+  [coll]
+  (if (= (count coll) 1) (first coll) coll))
 
 (defn map-invert
-  "Get all the input/output instruments to/from a bus."
+  "If instrument i/o, return bus i/o, and vice versa."
   [io-map]
   (let [names   (keys io-map)
         fn-in   (fn
@@ -62,3 +60,11 @@
         io-in   (reduce #(fn-in %1 %2 (get-in io-map [%2 :out])) {} names)
         io-all  (reduce #(fn-out %1 %2 (get-in io-map [%2 :in])) io-in names)]
     io-all))
+
+(defn delta
+  "Change parameter based on step size."
+  [id param-get-fn param-set-fn param-min param-max param-step delta]
+  (let [val (+ (apply param-get-fn id) (* param-step delta))]
+    (apply param-set-fn
+      (into id
+        [(max (min val param-max) param-min)]))))

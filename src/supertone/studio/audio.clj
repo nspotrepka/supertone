@@ -30,8 +30,8 @@
   (in in-bus 2))
 
 (definst sawboy
-  [freq 220]
-  (saw freq))
+  [freq {:default 200 :min 2 :max 20000 :step 1}]
+  [(saw freq) (saw freq)])
 
 (defrecord Audio [inst-map inst-ctl inst-nodes fx-map fx-ctl inst-io])
 
@@ -90,9 +90,21 @@
   [name]
   (or (get @inst-nodes* name) []))
 
-(defn- inst-param-all
-  [name pname]
-  (first (filter #(= (:name %) pname) (:params (inst-get name)))))
+(defn- param-map
+  [synth pname]
+  (some #(when (= (:name %) pname) %) (:params synth)))
+
+(defn- param-map-synth
+  [synth pname]
+  (merge
+    {:min 0 :max 100000 :step 1}
+    (param-map synth pname)))
+
+(defn- param-map-ctl
+  [synth pname]
+  (merge
+    {:min 0 :max 0 :step 0}
+    (param-map synth pname)))
 
 (defn inst-params
   "Get instrument parameter names."
@@ -104,7 +116,7 @@
 (defn inst-param
   "Get instrument parameter."
   [name pname]
-  (let [a         (:value (inst-param-all name pname))
+  (let [a         (:value (param-map-synth (inst-get name) pname))
         ctl-nodes (inst-ctl-nodes name pname)]
     (if (empty? ctl-nodes)
       (if (nil? a) nil (float @a))
@@ -116,56 +128,58 @@
   [name pname value]
   (let [inst      (inst-get name)
         ctl-nodes (inst-ctl-nodes name pname)]
-    (swap! (:value (inst-param-all name pname)) (constantly value))
+    (swap! (:value (param-map-synth (inst-get name) pname)) (constantly value))
     (if (empty? ctl-nodes)
       (ctl inst pname value)
       (control-bus-set!
         (int (node-get-control (first ctl-nodes) :in-bus1))
         value))))
 
-(defn- inst-ctl-map
-  [name pname bus]
-  (dorun (map #(node-map-controls* % [pname (int bus)]) (inst-nodes name))))
+(defn inst-param-reset!
+  [name pname]
+  (inst-param!
+    name
+    pname
+    (:default (param-map-synth (inst-get name) pname))))
+
+(defn inst-param-delta!
+  "Change instrument parameter based on step size."
+  [name pname delta]
+  (let [all     (param-map-synth (inst-get name) pname)
+        min-val (:min all)
+        max-val (:max all)
+        step    (:step all)]
+    (util/delta
+      [name pname]
+      inst-param
+      inst-param!
+      min-val
+      max-val
+      step
+      delta)))
 
 (defn inst-ctl-add!
   "Add a control bus to an instrument parameter."
   [name pname bus]
-  (let [ctl-nodes (inst-ctl-nodes name pname)
-        in-bus1   (if (empty? ctl-nodes)
-                    (let [b (bus/control)]
-                      (control-bus-set! b (inst-param name pname))
-                      b)
-                    (node-get-control (last ctl-nodes) :out-bus))
-        out-bus   (bus/control)
-        ctl-node  (control/mix
-                    [:tail (groups/control)]
-                    :in-bus1 in-bus1
-                    :in-bus2 bus
-                    :out-bus out-bus)]
-    (inst-ctl-map name pname (bus/bus-id out-bus))
-    (swap! inst-ctl* update-in [name pname]
-      #(into (if (nil? %) [] %) [ctl-node]))
-    ctl-node))
+  (control/mix-add!
+    inst-ctl*
+    [name pname]
+    bus
+    (inst-ctl-nodes name pname)
+    (inst-nodes name)
+    inst-param))
 
 (defn inst-ctl-remove!
   "Remove a control node from an instrument parameter."
   [name pname ctl-node]
-  (let [in-bus1   (node-get-control ctl-node "in-bus1")
-        out-bus   (node-get-control ctl-node "out-bus")
-        ctl-nodes (inst-ctl-nodes name pname)
-        index     (.indexOf ctl-nodes ctl-node)]
-    (if (< (+ index 1) (count ctl-nodes))
-      (let [next-node (get ctl-nodes (+ index 1))]
-        (node-control* next-node ["in-bus1" (int in-bus1)]))
-      (inst-ctl-map name pname in-bus1))
-    (swap! inst-ctl* update-in [name pname]
-      #(into [] (remove #{ctl-node} %)))
-    (when (empty? (inst-ctl-nodes name pname))
-      (inst-param! name pname (control-bus-get (int in-bus1)))
-      (bus/free-control-id in-bus1))
-    (node-free* ctl-node)
-    (bus/free-control-id out-bus)
-    nil))
+  (control/mix-remove!
+    inst-ctl*
+    [name pname]
+    ctl-node
+    (inst-ctl-nodes name pname)
+    (inst-nodes name)
+    inst-param
+    inst-param!))
 
 (defn inst-ctl-clear!
   "Clear all control nodes from an instrument parameter."
@@ -174,15 +188,43 @@
     #(inst-ctl-remove! name pname %)
     (inst-ctl-nodes name pname))))
 
-(defn ctl-amt
+(defn ctl-amt-get
   "Get the control's magnitude."
   [ctl-node]
-  (node-get-control ctl-node :amt))
+  (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])]
+    (util/single (map
+      #(node-get-control % :amt)
+      nodes))))
 
-(defn ctl-amt!
+(defn ctl-amt-set
   "Set the control's magnitude."
   [ctl-node amt]
-  (node-control* ctl-node [:amt amt]))
+  (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])
+        amts  (if (sequential? amt) amt (repeat (count nodes) amt))]
+    (util/single (dorun (map
+      #(node-control* %1 [:amt %2])
+      nodes amts)))))
+
+(defn ctl-amt-reset
+  [ctl-node]
+  (ctl-amt-set ctl-node 0.0))
+
+(defn inst-ctl-amt-delta
+  "Change the instrument control's magnitude based on step size."
+  [name pname ctl-node delta]
+  (let [all     (param-map-ctl (inst-get name) pname)
+        min-val (:min all)
+        max-val (:max all)
+        big-val (- max-val min-val)
+        step    (:step all)]
+    (util/delta
+      [ctl-node]
+      ctl-amt-get
+      ctl-amt-set
+      (* big-val -1)
+      big-val
+      step
+      delta)))
 
 (defn inst-in
   "Get instrument input bus."
@@ -197,12 +239,23 @@
 (defn fx-nodes
   "Get the fx nodes of an instrument"
   [name]
-  (or (map #(:node %) (get @fx-map* name)) []))
+  (or (flatten (map #(:node %) (get @fx-map* name))) []))
+
+(defn fx-get-all
+  "Get instrument fx chain."
+  [name]
+  (get @fx-map* name))
 
 (defn fx-get
-  "Get instrument fx chain."
+  "Get instrument fx synth."
   [name fx-node]
-  (first (filter #(= (:node %) fx-node) (get @fx-map* name))))
+  (some
+    #(when
+      (or
+        (= (:node %) fx-node)
+        (contains? (set (:node %)) fx-node))
+      %)
+    (fx-get-all name)))
 
 (defn fx-ctl-nodes
   "Get the list of synths controlling an fx parameter."
@@ -217,7 +270,7 @@
 (defn fx-param
   "Get fx parameter(s)."
   [name fx-node pname]
-  (let [nodes (if (vector? fx-node) fx-node [fx-node])]
+  (let [nodes (if (sequential? fx-node) fx-node [fx-node])]
     (util/single (map
       (fn [fx-n]
         (let [ctl-nodes (fx-ctl-nodes name fx-n pname)]
@@ -240,7 +293,7 @@
                         (bus/float-range
                           (node-get-control fx-n (:name (:bus %)))
                           (:num-channels %)))
-                      (if (vector? fx-node) fx-node [fx-node]))
+                      (if (sequential? fx-node) fx-node [fx-node]))
                     arg-maps))
          external (remove (set (bus/bus-range (:bus (inst-get name)))) busses)
          f        (set (map #(float %) external))]
@@ -254,17 +307,17 @@
 (defn fx-index
   "Get index of fx."
   [name fx-node]
-  (.indexOf (fx-get name) (fx-get name fx-node)))
+  (.indexOf (fx-get-all name) (fx-get name fx-node)))
 
 (defn fx-move-before!
   "Move fx before on instrument."
   [name fx-node]
   (let [index  (fx-index name fx-node)
         before (dec index)]
-    (when (and (>= index 1) (< index (count (fx-get name))))
+    (when (and (>= index 1) (< index (count (fx-get-all name))))
       (swap! fx-map* update-in [name] util/swap index before)
-      (let [other-node (:node ((fx-get name) index))
-            nodes (if (vector? fx-node) fx-node [fx-node])]
+      (let [other-node (:node ((fx-get-all name) index))
+            nodes (if (sequential? fx-node) fx-node [fx-node])]
         (dorun (map
           #(node-place* % :before (first other-node))
           nodes))))))
@@ -274,10 +327,10 @@
   [name fx-node]
   (let [index (fx-index name fx-node)
         after (inc index)]
-    (when (and (>= index 0) (< index (dec (count (fx-get name)))))
+    (when (and (>= index 0) (< index (dec (count (fx-get-all name)))))
       (swap! fx-map* update-in [name] util/swap index after)
       (let [other-node (:node ((fx-get name) index))
-            nodes (if (vector? fx-node) fx-node [fx-node])]
+            nodes (if (sequential? fx-node) fx-node [fx-node])]
         (dorun (map
           #(node-place* % :after (last other-node))
           (reverse nodes)))))))
@@ -307,7 +360,7 @@
   []
   (util/map-invert (inst-io)))
 
-(defn sort-node-tree
+(defn sort-node-tree!
   "Sort the instruments in the node tree."
   []
   (let [io-inst     (inst-io)
@@ -348,7 +401,7 @@
     (when (inst-in name)
       (inst-param! name "in-bus" (float bus2))
       (inst-io-swap! name)
-      (sort-node-tree))))
+      (sort-node-tree!))))
 
 (defn inst-out!
   "Set instrument output bus."
@@ -356,13 +409,13 @@
   (let [bus2 (if bus bus nil-id)]
     (ctl (:mixer (inst-get name)) :out-bus bus2)
     (inst-io-swap! name)
-    (sort-node-tree)))
+    (sort-node-tree!)))
 
 (defn fx-param!
   "Set fx parameter(s). Pass values as a vector for multiple channels."
   [name fx-node pname value]
-  (let [nodes (if (vector? fx-node) fx-node [fx-node])
-        vals  (if (vector? value) value [value])]
+  (let [nodes (if (sequential? fx-node) fx-node [fx-node])
+        vals  (if (sequential? value) value (repeat (count nodes) value))]
     (util/single (dorun (map
       (fn [fx-n val]
         (let [ctl-nodes (fx-ctl-nodes name fx-n pname)]
@@ -373,55 +426,65 @@
               val))))
       nodes vals))))
     (when (inst-io-swap! name)
-      (sort-node-tree)))
+      (sort-node-tree!)))
+
+(defn fx-param-reset!
+  [name fx-node pname]
+  (fx-param!
+    name
+    fx-node
+    pname
+    (:default (param-map-synth (:synth (fx-get name fx-node)) pname))))
+
+(defn fx-param-delta!
+  "Change instrument parameter based on step size."
+  [name fx-node pname delta]
+  (let [all     (param-map-synth (:synth (fx-get name fx-node)) pname)
+        min-val (:min all)
+        max-val (:max all)
+        step    (:step all)
+        nodes   (if (sequential? fx-node) fx-node [fx-node])]
+      (dorun (map
+        #(util/delta
+          [name % pname]
+          fx-param
+          fx-param!
+          min-val
+          max-val
+          step
+          delta)
+        nodes))))
 
 (defn fx-ctl-add!
   "Add a control bus to an fx parameter."
   [name fx-node pname bus]
-  (let [nodes (if (vector? fx-node) fx-node [fx-node])]
+  (let [nodes (if (sequential? fx-node) fx-node [fx-node])]
     (util/single (doall (map
       (fn [fx-n]
-        (let [ctl-nodes (fx-ctl-nodes name fx-n pname)
-              in-bus1   (if (empty? ctl-nodes)
-                          (let [b (bus/control)]
-                            (control-bus-set! b (fx-param name fx-n pname))
-                            b)
-                          (node-get-control (last ctl-nodes) :out-bus))
-              out-bus   (bus/control)
-              ctl-node  (control/mix
-                          [:tail (groups/control)]
-                          :in-bus1 in-bus1
-                          :in-bus2 bus
-                          :out-bus out-bus)]
-          (node-map-controls* fx-n [pname (int (bus/bus-id out-bus))])
-          (swap! fx-ctl* update-in [name fx-n pname]
-            #(into (if (nil? %) [] %) [ctl-node]))
-          ctl-node))
+        (control/mix-add!
+          fx-ctl*
+          [name fx-n pname]
+          bus
+          (fx-ctl-nodes name fx-n pname)
+          [fx-n]
+          fx-param))
       nodes)))))
 
 (defn fx-ctl-remove!
   "Remove a control node from an instrument parameter."
-  [name fx-node pname ctl-node]
-  (let [nodes  (if (vector? fx-node) fx-node [fx-node])
-        nodes2 (if (vector? ctl-node) ctl-node [ctl-node])]
-    (util/single (dorun (map (fn [fx-n ctl-n]
-      (let [in-bus1   (node-get-control ctl-n "in-bus1")
-            out-bus   (node-get-control ctl-n "out-bus")
-            ctl-nodes (fx-ctl-nodes name fx-n pname)
-            index     (.indexOf ctl-nodes ctl-n)]
-        (if (< (+ index 1) (count ctl-nodes))
-          (let [next-node (get ctl-nodes (+ index 1))]
-            (node-control* next-node ["in-bus1" (int in-bus1)]))
-          (node-map-controls* fx-n [pname (int in-bus1)]))
-        (swap! fx-ctl* update-in [name fx-n pname]
-          #(into [] (remove #{ctl-n} %)))
-        (when (empty? (fx-ctl-nodes name fx-n pname))
-          (fx-param! name fx-n pname (control-bus-get (int in-bus1)))
-          (bus/free-control-id in-bus1))
-        (node-free* ctl-n)
-        (bus/free-control-id out-bus)
-        nil))
-      nodes nodes2)))))
+  [name fx-n pname ctl-node]
+  (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])]
+    (util/single (dorun (map
+      (fn [ctl-n]
+        (control/mix-remove!
+          fx-ctl*
+          [name fx-n pname]
+          ctl-n
+          (fx-ctl-nodes name fx-n pname)
+          [fx-n]
+          fx-param
+          fx-param!))
+      nodes)))))
 
 (defn fx-ctl-clear!
   "Clear all control nodes from an instrument parameter."
@@ -431,7 +494,27 @@
       (dorun (map
         #(fx-ctl-remove! name fx-n pname %)
         (fx-ctl-nodes name fx-n pname))))
-    (if (vector? fx-node) fx-node [fx-node]))))
+    (if (sequential? fx-node) fx-node [fx-node]))))
+
+(defn fx-ctl-amt-delta
+  "Change the fx control's magnitude based on step size."
+  [name fx-node pname ctl-node delta]
+  (let [all     (param-map-ctl (:synth (fx-get name fx-node)) pname)
+        min-val (:min all)
+        max-val (:max all)
+        big-val (- max-val min-val)
+        step    (:step all)
+        nodes   (if (sequential? ctl-node) ctl-node [ctl-node])]
+    (dorun (map
+      #(util/delta
+        [%]
+        ctl-amt-get
+        ctl-amt-set
+        (* big-val -1)
+        big-val
+        step
+        delta)
+      nodes))))
 
 (defn- sdef-set-bus
   [sdef bus]
@@ -463,7 +546,7 @@
        new-name# new-name
        old-inst# (get (inst-library) old-name#)
        n-chans#  (:n-chans old-inst#)
-       inst-bus# (audio-bus n-chans#)
+       inst-bus# (bus/audio n-chans#)
        container-group# (with-server-sync
                           #(group (str "Inst " new-name# " Container")
                                   :tail (:instrument-group @studio*))
@@ -508,7 +591,7 @@
    (swap! fx-map* assoc new-name# [])
    (swap! fx-ctl* assoc new-name# {})
    (inst-io-swap! new-name#)
-   (sort-node-tree)
+   (sort-node-tree!)
    inst#))
 
  (defn inst-rename!
@@ -519,7 +602,7 @@
    (let [inst       (inst-get name)
          inst-ctl   (get @inst-ctl* name)
          inst-nodes (get @inst-nodes* name)
-         fx         (fx-get name)
+         fx         (fx-get-all name)
          fx-ctl     (get @fx-ctl* name)
          io         (get (inst-io) name)
          index      (.indexOf (node-order) name)]
@@ -568,7 +651,7 @@
         fx-node (inst-fx! inst fx)]
     (swap! fx-map* update-in [name] conj {:node fx-node :synth fx})
     (when (inst-io-swap! name)
-      (sort-node-tree))
+      (sort-node-tree!))
     fx-node))
 
 (defn fx-remove!
@@ -578,7 +661,7 @@
     (partial fx-ctl-clear! name fx-node)
     (fx-params name fx-node)))
   (swap! fx-map* update-in [name] (partial remove #(= (:node %) fx-node)))
-  (dorun (map #(node-free* %) (if (vector? fx-node) fx-node [fx-node])))
+  (dorun (map #(node-free* %) (if (sequential? fx-node) fx-node [fx-node])))
   (inst-io-swap! name)
   nil)
 
@@ -598,9 +681,9 @@
     (float? n) (bus/alloc-audio-id? n 2)
     :else (throw (Exception. (str "Unknown type: " n)))))
 
-(defn extend-in!
+(defn pass-in!
   "Route the input of an instrument or a bus through another pass."
-  ([n new-name] (extend-in! n new-name :mono))
+  ([n new-name] (pass-in! n new-name :mono))
   ([n new-name channels]
    (let [stereo (= channels :stereo)
          old-name (if stereo "stereo-pass" "mono-pass")
@@ -617,9 +700,9 @@
                     (inst-out! new-name n))
        :else (throw (Exception. (str "Unknown type: " n)))))))
 
-(defn extend-out!
+(defn pass-out!
   "Route the output of an instrument or a bus through another pass."
-  ([n new-name] (extend-out! n new-name :mono))
+  ([n new-name] (pass-out! n new-name :mono))
   ([n new-name channels]
    (let [stereo (= channels :stereo)
          old-name (if stereo "stereo-pass" "mono-pass")
