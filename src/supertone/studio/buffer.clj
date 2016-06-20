@@ -3,19 +3,19 @@
             [overtone.sc.sample :refer :all
             [supertone.util     :as util]))
 
-(defrecord Buffer [buffer-vec])
+(defrecord Buffer [sample-vec])
 
-(def buffer-vec* (atom nil))
+(def sample-vec* (atom nil))
 
 (defn init
   [s]
   (map->Buffer {
-    :buffer-vec (util/swap-or buffer-vec* (:buffer-vec s) [])}))
+    :sample-vec (util/swap-or sample-vec* (:sample-vec s) [])}))
 
 (defn dispose
   [s]
   (map->Audio {
-    :buffer-vec (or @buffer-vec* (:buffer-vec s))}))
+    :sample-vec (or @sample-vec* (:sample-vec s))}))
 
 (def nil-id -3000)
 

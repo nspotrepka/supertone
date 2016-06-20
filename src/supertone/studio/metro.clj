@@ -22,9 +22,13 @@
   [s]
   (map->Metro {
     :bpm          (util/swap-or bpm* (:bpm s)
-                    (let [b (bus/control)] (control-bus-set! b 120) b))
+                    (let [b (bus/control 1 "Tempo")]
+                      (control-bus-set! b 120)
+                      b))
     :ppq          (util/swap-or ppq* (:ppq s)
-                    (let [b (bus/control)] (control-bus-set! b 96) b))
+                    (let [b (bus/control 1 "Beat subdivision")]
+                      (control-bus-set! b 96)
+                      b))
     :metro-node   (util/swap-or metro-node* (:metro-node s))
     :metro-count  (util/swap-or metro-count* (:metro-count s) 0)}))
 

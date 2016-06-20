@@ -9,7 +9,7 @@
   :right (into [] (range 19 99 10))})
 
 (def colors {
-  :gray   [0 0 1 1 2 2 3 3]
+  :gray   [0 1 2 3]
   :light  [4 8 12 20 36 44 48 52]
   :normal [5 9 13 21 37 45 49 53]
   :dark   [7 11 15 23 39 47 51 55]})

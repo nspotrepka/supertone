@@ -61,17 +61,21 @@
 
 (defn audio
   "Allocate an audio bus."
-  ([] (audio 1))
-  ([n] (let [bus (audio-bus n)]
-         (swap! bus-audio* bus-into bus)
-         bus)))
+  ([] (audio 1 ""))
+  ([n] (audio n ""))
+  ([n name]
+   (let [bus (audio-bus n name)]
+     (swap! bus-audio* bus-into bus)
+     bus)))
 
 (defn control
   "Allocate a control bus."
-  ([] (control 1))
-  ([n] (let [bus (control-bus n)]
-         (swap! bus-control* bus-into bus)
-         bus)))
+  ([] (control 1 ""))
+  ([n] (control n ""))
+  ([n name]
+   (let [bus (control-bus n name)]
+     (swap! bus-control* bus-into bus)
+     bus)))
 
 (defn alloc-audio-id?
   ([index] (alloc-audio-id? index 1))
