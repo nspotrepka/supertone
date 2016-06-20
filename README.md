@@ -1,49 +1,36 @@
 # Supertone
 
 Supertone is a high-level music workstation focused on quick and easy
-composition of electronic tunes in a live setting. Generative music elements
-are planned for future versions.
-
-This project is still in progress, so bookmark this page, and check back in a
-month or so!
-
-<!--
-
-# supertone
-
-FIXME: description
+composition of electronic tunes in a live setting.
 
 ## Installation
 
-Download from http://example.com/FIXME.
+Make sure
+[Leiningen](https://github.com/technomancy/leiningen) is installed, and clone this repository:
+```sh
+$ brew install leiningen
 
-## Usage
+$ git clone https://github.com/nspotrepka/supertone.git
+```
 
-FIXME: explanation
+## Getting Started
 
-    $ java -jar supertone-0.1.0-standalone.jar [args]
+To get started, start a new REPL session:
+```sh
+$ lein repl
+```
 
-## Options
+When the REPL session has loaded, navigate to the `dev` namespace and go!
+```clj
+user=> (dev)
 
-FIXME: listing of options this app accepts.
+dev=> (go)
+```
 
-## Examples
+## Dependencies
 
-...
+[Clojure](https://clojure.org/)
 
-### Bugs
+[Overtone](https://github.com/overtone/overtone)
 
-...
-
-### Any Other Sections
-### That You Think
-### Might be Useful
-
-## License
-
-Copyright © 2015 FIXME
-
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
-
--->
+[Seesaw](https://github.com/daveray/seesaw)

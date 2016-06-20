@@ -1,6 +1,5 @@
 (ns supertone.view.gui
   (:require [seesaw.core    :refer :all]
-            [com.evocomputing.colors :refer :all]
             [overtone.sc.node :refer :all]
             [supertone.util :as util]
             [supertone.studio.audio :as audio]
