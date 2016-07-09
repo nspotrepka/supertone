@@ -23,17 +23,26 @@
   (.setAlwaysOnTop frame false))
 
 (defn content
-  []
+  [bg fg font]
   (let [l1 (listbox :model ["Chiptune" "Sinewave" "WhAt"]
                     :background "#888"
                     :foreground :red)
         l2 (listbox :model ["Never" "gonna" "give" "you" "up"])
-        l3 (listbox :model (range 0 100))]
+        l3 (listbox :model (range 0 100))
+        ]
     (border-panel :hgap 10 :vgap 10
-      :center (grid-panel
-                :hgap 5
-                :rows 1
-                :items [l1 l2 (scrollable l3)])
+      :center (left-right-split
+                (grid-panel
+                  :hgap 5
+                  :rows 1
+                  :items [
+                    (scrollable l1)
+                    (scrollable l2)
+                    (scrollable l3)])
+                (grid-panel
+                  :hgap 5
+                  :columns 8
+                  :items (into [] (repeat 64 "1"))))
       :north (horizontal-panel
                :border "Supertone"
                :items [(label :text "MENU STUFF HERE?")])
@@ -48,7 +57,7 @@
 (defn make-frame
   []
   (frame :title "Supertone"
-         :content (content)
+         :content (content "#101010" "#f0f0f0" "MONOSPACED-PLAIN-12")
          :size [800 :by 600]
          :on-close :dispose))
 

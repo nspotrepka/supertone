@@ -80,6 +80,17 @@
   [name]
   (get @inst-map* name))
 
+(defn inst-old-name
+  "Get instrument's old name."
+  [name]
+  (-> (inst-get name)
+    (:sdef)
+    (:name)
+    (clojure.string/split #" ")
+    (first)
+    (clojure.string/split #"/")
+    (last)))
+
 (defn inst-ctl-nodes
   "Get the list of synths controlling an instrument parameter."
   [name pname]
@@ -187,44 +198,6 @@
   (dorun (map
     #(inst-ctl-remove! name pname %)
     (inst-ctl-nodes name pname))))
-
-(defn ctl-amt-get
-  "Get the control's magnitude."
-  [ctl-node]
-  (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])]
-    (util/single (map
-      #(node-get-control % :amt)
-      nodes))))
-
-(defn ctl-amt-set
-  "Set the control's magnitude."
-  [ctl-node amt]
-  (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])
-        amts  (if (sequential? amt) amt (repeat (count nodes) amt))]
-    (util/single (dorun (map
-      #(node-control* %1 [:amt %2])
-      nodes amts)))))
-
-(defn ctl-amt-reset
-  [ctl-node]
-  (ctl-amt-set ctl-node 0.0))
-
-(defn inst-ctl-amt-delta
-  "Change the instrument control's magnitude based on step size."
-  [name pname ctl-node delta]
-  (let [all     (param-map-ctl (inst-get name) pname)
-        min-val (:min all)
-        max-val (:max all)
-        big-val (- max-val min-val)
-        step    (:step all)]
-    (util/delta
-      [ctl-node]
-      ctl-amt-get
-      ctl-amt-set
-      (* big-val -1)
-      big-val
-      step
-      delta)))
 
 (defn inst-in
   "Get instrument input bus."
@@ -334,6 +307,64 @@
         (dorun (map
           #(node-place* % :after (last other-node))
           (reverse nodes)))))))
+
+(defn ctl-amt-get
+  "Get the control's magnitude."
+  [ctl-node]
+  (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])]
+    (util/single (map
+      #(node-get-control % :amt)
+      nodes))))
+
+(defn ctl-amt-set
+  "Set the control's magnitude."
+  [ctl-node amt]
+  (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])
+        amts  (if (sequential? amt) amt (repeat (count nodes) amt))]
+    (util/single (dorun (map
+      #(node-control* %1 [:amt %2])
+      nodes amts)))))
+
+(defn ctl-amt-reset
+  [ctl-node]
+  (ctl-amt-set ctl-node 0.0))
+
+(defn inst-ctl-amt-delta
+  "Change the instrument control's magnitude based on step size."
+  [name pname ctl-node delta]
+  (let [all     (param-map-ctl (inst-get name) pname)
+        min-val (:min all)
+        max-val (:max all)
+        big-val (- max-val min-val)
+        step    (:step all)]
+    (util/delta
+      [ctl-node]
+      ctl-amt-get
+      ctl-amt-set
+      (* big-val -1)
+      big-val
+      step
+      delta)))
+
+(defn fx-ctl-amt-delta
+  "Change the fx control's magnitude based on step size."
+  [name fx-node pname ctl-node delta]
+  (let [all     (param-map-ctl (:synth (fx-get name fx-node)) pname)
+        min-val (:min all)
+        max-val (:max all)
+        big-val (- max-val min-val)
+        step    (:step all)
+        nodes   (if (sequential? ctl-node) ctl-node [ctl-node])]
+    (dorun (map
+      #(util/delta
+        [%]
+        ctl-amt-get
+        ctl-amt-set
+        (* big-val -1)
+        big-val
+        step
+        delta)
+      nodes))))
 
 (defn inst-io-swap!
   "Update the input/output info for an instrument."
@@ -496,26 +527,6 @@
         (fx-ctl-nodes name fx-n pname))))
     (if (sequential? fx-node) fx-node [fx-node]))))
 
-(defn fx-ctl-amt-delta
-  "Change the fx control's magnitude based on step size."
-  [name fx-node pname ctl-node delta]
-  (let [all     (param-map-ctl (:synth (fx-get name fx-node)) pname)
-        min-val (:min all)
-        max-val (:max all)
-        big-val (- max-val min-val)
-        step    (:step all)
-        nodes   (if (sequential? ctl-node) ctl-node [ctl-node])]
-    (dorun (map
-      #(util/delta
-        [%]
-        ctl-amt-get
-        ctl-amt-set
-        (* big-val -1)
-        big-val
-        step
-        delta)
-      nodes))))
-
 (defn- sdef-set-bus
   [sdef bus]
   (update
@@ -569,7 +580,7 @@
        sdef#      (update
                     (sdef-set-bus (:sdef old-inst#) (bus/bus-id inst-bus#))
                     :name
-                    #(str % "-" new-name#))
+                    #(str % " " new-name#))
        arg-names# (:args old-inst#)
        params#    (map #(assoc % :value (atom (:default %)))
                        (:params old-inst#))
@@ -665,6 +676,33 @@
   (inst-io-swap! name)
   nil)
 
+(defn inst-node-add!
+  "Add node for an instrument."
+  [name]
+  (let [inst-node ((inst-get name))]
+    (dorun (map
+      #(when-let [ctl-nodes (seq (inst-ctl-nodes name %))]
+         (node-map-controls*
+           inst-node
+           [% (int (node-get-control (last ctl-nodes) :out-bus))]))
+      (inst-params name)))
+    (swap! inst-nodes* update name
+      #(into % [inst-node]))
+    inst-node))
+
+(defn inst-node-remove!
+  "Remove node for an instrument."
+  [name inst-node]
+  (node-free* inst-node)
+  (swap! inst-nodes* update name
+    #(into [] (remove #{inst-node} %)))
+  nil)
+
+(defn inst-node-clear!
+  "Clear all nodes for an instrument."
+  [name]
+  (dorun (map (partial inst-node-remove! name) (inst-nodes name))))
+
 (defn inst-add-to-bus!
   "Add an instrument and connect it to input and output busses."
   [old-name new-name in-bus out-bus]
@@ -718,33 +756,6 @@
                     (dorun (map #(inst-in! % bus) out))
                     (inst-in! new-name n))
        :else (throw (Exception. (str "Unknown type: " n)))))))
-
-(defn inst-node-add!
-  "Add node for an instrument."
-  [name]
-  (let [inst-node ((inst-get name))]
-    (dorun (map
-      #(when-let [ctl-nodes (seq (inst-ctl-nodes name %))]
-         (node-map-controls*
-           inst-node
-           [% (int (node-get-control (last ctl-nodes) :out-bus))]))
-      (inst-params name)))
-    (swap! inst-nodes* update name
-      #(into % [inst-node]))
-    inst-node))
-
-(defn inst-node-remove!
-  "Remove node for an instrument."
-  [name inst-node]
-  (node-free* inst-node)
-  (swap! inst-nodes* update name
-    #(into [] (remove #{inst-node} %)))
-  nil)
-
-(defn inst-node-clear!
-  "Clear all nodes for an instrument."
-  [name]
-  (dorun (map (partial inst-node-remove! name) (inst-nodes name))))
 
 (defn clear-busses
   "Free all unused busses."

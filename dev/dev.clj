@@ -15,6 +15,7 @@
    [supertone.studio.metro       :as metro]
    [supertone.studio.control     :as control]
    [supertone.studio.audio       :as audio]
+   [supertone.studio.sampler     :as sampler]
    [supertone.studio.sequencer   :as sequencer]
    [supertone.studio.midi        :as midi]
    [supertone.view.gui           :as gui]

@@ -6,6 +6,7 @@
             [supertone.studio.metro       :as metro]
             [supertone.studio.control     :as control]
             [supertone.studio.audio       :as audio]
+            [supertone.studio.sampler     :as sampler]
             [supertone.studio.sequencer   :as sequencer]
             [supertone.view.gui           :as gui])
   (:gen-class :main true))
@@ -23,6 +24,7 @@
       :metro     (metro/init (:metro s))
       :control   (control/init (:control s))
       :audio     (audio/init (:audio s))
+      :sampler   (sampler/init (:sampler s))
       :sequencer (sequencer/init (:sequencer s))
       :gui       (gui/init (:gui s))})))
 
@@ -37,6 +39,7 @@
       :metro     (metro/dispose (:metro s))
       :control   (metro/dispose (:control s))
       :audio     (audio/dispose (:audio s))
+      :sampler   (sampler/dispose (:sampler s))
       :sequencer (sequencer/dispose (:sequencer s))
       :gui       (gui/dispose (:gui s))})))
 
