@@ -15,8 +15,8 @@
             [overtone.studio.mixer              :refer :all]
             [overtone.studio.inst               :refer :all]
             [supertone.util                     :as util]
-            [supertone.studio.groups            :as groups]
             [supertone.studio.bus               :as bus]
+            [supertone.studio.groups            :as groups]
             [supertone.studio.control           :as control]))
 
 (def nil-id -1000)
@@ -92,7 +92,7 @@
     (last)))
 
 (defn inst-ctl-nodes
-  "Get the list of synths controlling an instrument parameter."
+  "Get a list of synths controlling an instrument parameter."
   [name pname]
   (or (get-in @inst-ctl* [name pname]) []))
 
@@ -147,6 +147,7 @@
         value))))
 
 (defn inst-param-reset!
+  "Reset instrument parameter to default value."
   [name pname]
   (inst-param!
     name
@@ -210,17 +211,17 @@
   (node-get-control (:mixer (inst-get name)) :out-bus))
 
 (defn fx-nodes
-  "Get the fx nodes of an instrument"
+  "Get the fx nodes for an instrument."
   [name]
   (or (flatten (map #(:node %) (get @fx-map* name))) []))
 
 (defn fx-get-all
-  "Get instrument fx chain."
+  "Get all fx data for an instrument."
   [name]
   (get @fx-map* name))
 
 (defn fx-get
-  "Get instrument fx synth."
+  "Get the synth of an fx node."
   [name fx-node]
   (some
     #(when
@@ -231,17 +232,17 @@
     (fx-get-all name)))
 
 (defn fx-ctl-nodes
-  "Get the list of synths controlling an fx parameter."
+  "Get a list of synths controlling an fx parameter."
   [name fx-node pname]
   (or (get-in @fx-ctl* [name fx-node pname]) []))
 
 (defn fx-params
-  "Get all fx parameters."
+  "Get fx parameter names."
   [name fx-node]
   (:args (:synth (fx-get name fx-node))))
 
 (defn fx-param
-  "Get fx parameter(s)."
+  "Get fx parameter(s). Returns a vector for multiple channels."
   [name fx-node pname]
   (let [nodes (if (sequential? fx-node) fx-node [fx-node])]
     (util/single (map
@@ -278,12 +279,12 @@
   ([name fx-node] []))
 
 (defn fx-index
-  "Get index of fx."
+  "Get the index of an fx node."
   [name fx-node]
   (.indexOf (fx-get-all name) (fx-get name fx-node)))
 
 (defn fx-move-before!
-  "Move fx before on instrument."
+  "Switch fx node with its preceding node."
   [name fx-node]
   (let [index  (fx-index name fx-node)
         before (dec index)]
@@ -296,7 +297,7 @@
           nodes))))))
 
 (defn fx-move-after!
-  "Move fx after on instrument."
+  "Switch fx node with its succeeding node."
   [name fx-node]
   (let [index (fx-index name fx-node)
         after (inc index)]
@@ -309,7 +310,7 @@
           (reverse nodes)))))))
 
 (defn ctl-amt-get
-  "Get the control's magnitude."
+  "Get control magnitude."
   [ctl-node]
   (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])]
     (util/single (map
@@ -317,7 +318,7 @@
       nodes))))
 
 (defn ctl-amt-set
-  "Set the control's magnitude."
+  "Set control magnitude."
   [ctl-node amt]
   (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])
         amts  (if (sequential? amt) amt (repeat (count nodes) amt))]
@@ -326,11 +327,12 @@
       nodes amts)))))
 
 (defn ctl-amt-reset
+  "Set control magnitude to zero."
   [ctl-node]
   (ctl-amt-set ctl-node 0.0))
 
 (defn inst-ctl-amt-delta
-  "Change the instrument control's magnitude based on step size."
+  "Change instrument control magnitude based on step size."
   [name pname ctl-node delta]
   (let [all     (param-map-ctl (inst-get name) pname)
         min-val (:min all)
@@ -347,7 +349,7 @@
       delta)))
 
 (defn fx-ctl-amt-delta
-  "Change the fx control's magnitude based on step size."
+  "Change fx control magnitude based on step size."
   [name fx-node pname ctl-node delta]
   (let [all     (param-map-ctl (:synth (fx-get name fx-node)) pname)
         min-val (:min all)
@@ -392,7 +394,7 @@
   (util/map-invert (inst-io)))
 
 (defn sort-node-tree!
-  "Sort the instruments in the node tree."
+  "Sort the instruments in the node tree. Computes and returns node order."
   []
   (let [io-inst     (inst-io)
         io-bus      (util/map-invert io-inst)
@@ -443,7 +445,7 @@
     (sort-node-tree!)))
 
 (defn fx-param!
-  "Set fx parameter(s). Pass values as a vector for multiple channels."
+  "Set fx parameter(s). Pass in values as a vector for multiple channels."
   [name fx-node pname value]
   (let [nodes (if (sequential? fx-node) fx-node [fx-node])
         vals  (if (sequential? value) value (repeat (count nodes) value))]
@@ -460,6 +462,7 @@
       (sort-node-tree!)))
 
 (defn fx-param-reset!
+  "Reset fx parameter(s) to default value."
   [name fx-node pname]
   (fx-param!
     name
@@ -468,7 +471,7 @@
     (:default (param-map-synth (:synth (fx-get name fx-node)) pname))))
 
 (defn fx-param-delta!
-  "Change instrument parameter based on step size."
+  "Change fx parameter(s) based on step size."
   [name fx-node pname delta]
   (let [all     (param-map-synth (:synth (fx-get name fx-node)) pname)
         min-val (:min all)
@@ -487,7 +490,7 @@
         nodes))))
 
 (defn fx-ctl-add!
-  "Add a control bus to an fx parameter."
+  "Add a control bus to fx parameter(s)."
   [name fx-node pname bus]
   (let [nodes (if (sequential? fx-node) fx-node [fx-node])]
     (util/single (doall (map
@@ -502,7 +505,7 @@
       nodes)))))
 
 (defn fx-ctl-remove!
-  "Remove a control node from an instrument parameter."
+  "Remove a control node from an individual fx parameter."
   [name fx-n pname ctl-node]
   (let [nodes (if (sequential? ctl-node) ctl-node [ctl-node])]
     (util/single (dorun (map
@@ -518,7 +521,7 @@
       nodes)))))
 
 (defn fx-ctl-clear!
-  "Clear all control nodes from an instrument parameter."
+  "Clear all control nodes from an fx parameter."
   [name fx-node pname]
   (dorun (map
     (fn [fx-n]
@@ -547,7 +550,7 @@
           #(conj (rest %) bus))]))))
 
 (defn inst-add!
-  "Duplicate an new instrument.
+  "Add a new instrument by duplicating an instrument from library.
    Usage: (inst-add! \"mono-pass\" \"example\")"
   [old-name new-name]
   (when (inst-get new-name)
@@ -666,7 +669,7 @@
     fx-node))
 
 (defn fx-remove!
-  "Remove an instrument's fx."
+  "Remove fx from instrument."
   [name fx-node]
   (dorun (map
     (partial fx-ctl-clear! name fx-node)
@@ -677,7 +680,7 @@
   nil)
 
 (defn inst-node-add!
-  "Add node for an instrument."
+  "Add a synth node for an instrument."
   [name]
   (let [inst-node ((inst-get name))]
     (dorun (map
@@ -691,7 +694,7 @@
     inst-node))
 
 (defn inst-node-remove!
-  "Remove node for an instrument."
+  "Remove a synth node for an instrument."
   [name inst-node]
   (node-free* inst-node)
   (swap! inst-nodes* update name
@@ -699,12 +702,13 @@
   nil)
 
 (defn inst-node-clear!
-  "Clear all nodes for an instrument."
+  "Clear all synth nodes for an instrument."
   [name]
   (dorun (map (partial inst-node-remove! name) (inst-nodes name))))
 
 (defn inst-add-to-bus!
-  "Add an instrument and connect it to input and output busses."
+  "Add an instrument and connect it to input and output busses.
+   Bus arguments can be nil."
   [old-name new-name in-bus out-bus]
   (let [inst (inst-add! old-name new-name)]
     (inst-in! new-name in-bus)
@@ -720,7 +724,7 @@
     :else (throw (Exception. (str "Unknown type: " n)))))
 
 (defn pass-in!
-  "Route the input of an instrument or a bus through another pass."
+  "Route the input of an instrument or a bus through a freshly created pass."
   ([n new-name] (pass-in! n new-name :mono))
   ([n new-name channels]
    (let [stereo (= channels :stereo)
@@ -739,7 +743,7 @@
        :else (throw (Exception. (str "Unknown type: " n)))))))
 
 (defn pass-out!
-  "Route the output of an instrument or a bus through another pass."
+  "Route the output of an instrument or a bus through a freshly created pass."
   ([n new-name] (pass-out! n new-name :mono))
   ([n new-name channels]
    (let [stereo (= channels :stereo)

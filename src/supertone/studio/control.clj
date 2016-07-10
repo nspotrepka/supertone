@@ -6,8 +6,8 @@
             [overtone.sc.ugens       :refer :all]
             [overtone.sc.synth       :refer :all]
             [supertone.util          :as util]
-            [supertone.studio.groups :as groups]
-            [supertone.studio.bus    :as bus]))
+            [supertone.studio.bus    :as bus]
+            [supertone.studio.groups :as groups]))
 
 (def nil-id -2000)
 
@@ -36,6 +36,7 @@
   (map->Control {
     :ctl-map (or @ctl-map* (:ctl-map s))}))
 
+;; Not quite adequate, you should rewrite this
 (defn ctl-library
   "List the control synths available to add."
   []
@@ -47,20 +48,36 @@
   []
   (or (keys @ctl-map*) '()))
 
-(defn ctl-get
-  "Get control by bus number."
+(defn- ctl-get
   [bus]
   (get @ctl-map* bus))
+
+(defn ctl-get-node
+  "Get the node for a control."
+  [bus]
+  (:node (ctl-get bus)))
+
+(defn ctl-get-synth
+  "Get the synth for a control."
+  [bus]
+  (:synth (ctl-get bus)))
+
+(defn ctl-params
+  "Get all control parameters."
+  [bus]
+  (remove
+    #{"out-bus"}
+    (:args (ctl-get-synth bus))))
 
 (defn ctl-param
   "Get a control parameter."
   [bus pname]
-  (node-get-control (ctl-get bus) pname))
+  (node-get-control (ctl-get-node bus) pname))
 
 (defn ctl-param!
   "Set a control parameter."
   [bus pname value]
-  (ctl (ctl-get bus) pname value))
+  (ctl (ctl-get-node bus) pname value))
 
 (defn ctl-add!
   "Add a control. Control synth must have out-bus param."
@@ -68,13 +85,13 @@
   (let [bus (bus/control)
         n   (apply (partial s [:tail (groups/control)]) args)]
     (node-control* n [:out-bus (:id bus)])
-    (swap! ctl-map* assoc bus n)
+    (swap! ctl-map* assoc bus {:node n :synth s})
     bus))
 
 (defn ctl-remove!
   "Remove a control."
   [bus]
-  (node-free* (ctl-get bus))
+  (node-free* (ctl-get-node bus))
   (bus/free bus)
   (swap! ctl-map* dissoc bus)
   nil)
