@@ -6,6 +6,8 @@
             [supertone.studio.metro       :as metro]
             [supertone.studio.control     :as control]
             [supertone.studio.audio       :as audio]
+            [supertone.studio.fx          :as fx]
+            [supertone.studio.inst        :as inst]
             [supertone.studio.sampler     :as sampler]
             [supertone.studio.sequencer   :as sequencer]
             [supertone.view.gui           :as gui])
