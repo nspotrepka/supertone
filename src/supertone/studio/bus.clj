@@ -14,11 +14,6 @@
 (def bus-audio* (atom nil))
 (def bus-control* (atom nil))
 
-(defn bus-id
-  "Get the id of a bus."
-  [bus]
-  (float (:id bus)))
-
 (defn float-range
   "Create a range of bus numbers."
   [index n-chans]
@@ -54,10 +49,20 @@
     :bus-control (or @bus-control* (:bus-control s))
     }))
 
+(defn bus-id
+  "Get the id of a bus."
+  [bus]
+  (float (:id bus)))
+
 (defn bus-audio
   "Get the list of audio busses."
   []
   @bus-audio*)
+
+(defn bus-control
+  "Get the list of control busses."
+  []
+  @bus-control*)
 
 (defn audio
   "Allocate an audio bus."

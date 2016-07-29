@@ -1,7 +1,5 @@
 (ns supertone.studio.control
-  (:require [overtone.libs.event     :only [event]
-                                     :refer :all]
-            [overtone.sc.bus         :refer :all]
+  (:require [overtone.sc.bus         :refer :all]
             [overtone.sc.node        :refer :all]
             [overtone.sc.ugens       :refer :all]
             [overtone.sc.synth       :refer :all]
@@ -22,81 +20,81 @@
       (in:kr in-bus1)
       (* (in:kr in-bus2) amt))))
 
-(defrecord Control [ctl-map])
+(defrecord Control [store])
 
-(def ctl-map* (atom nil))
+(def store* (atom nil))
 
 (defn init
   [s]
   (map->Control {
-    :ctl-map (util/swap-or ctl-map* (:ctl-map s) {})}))
+    :store (util/swap-or store* (:store s) {})}))
 
 (defn dispose
   [s]
   (map->Control {
-    :ctl-map (or @ctl-map* (:ctl-map s))}))
+    :store (or @store* (:store s))}))
 
 ;; Not quite adequate, you should rewrite this
-(defn ctl-library
+(defn library
   "List the control synths available to add."
   []
   (->> (util/list-synth)
     (filter #(= (type %) :overtone.sc.synth/synth))))
 
-(defn ctl-list
+(defn control-list
   "List control busses."
   []
-  (or (keys @ctl-map*) '()))
+  (or (keys @store*) '()))
 
-(defn- ctl-get
+(defn- control-get
   [bus]
-  (get @ctl-map* bus))
+  (get @store* bus))
 
-(defn ctl-get-node
+(defn control-get-node
   "Get the node for a control."
   [bus]
-  (:node (ctl-get bus)))
+  (:node (control-get bus)))
 
-(defn ctl-get-synth
+(defn control-get-synth
   "Get the synth for a control."
   [bus]
-  (:synth (ctl-get bus)))
+  (:synth (control-get bus)))
 
-(defn ctl-params
+(defn param-list
   "Get all control parameters."
   [bus]
   (remove
     #{"out-bus"}
-    (:args (ctl-get-synth bus))))
+    (:args (control-get-synth bus))))
 
-(defn ctl-param
+(defn param
   "Get a control parameter."
   [bus pname]
-  (node-get-control (ctl-get-node bus) pname))
+  (node-get-control (control-get-node bus) pname))
 
-(defn ctl-param!
+(defn param!
   "Set a control parameter."
   [bus pname value]
-  (ctl (ctl-get-node bus) pname value))
+  (ctl (control-get-node bus) pname value))
 
-(defn ctl-add!
+(defn add!
   "Add a control. Control synth must have out-bus param."
   [s & args]
   (let [bus (bus/control)
         n   (apply (partial s [:tail (groups/control)]) args)]
     (node-control* n [:out-bus (:id bus)])
-    (swap! ctl-map* assoc bus {:node n :synth s})
+    (swap! store* assoc bus {:node n :synth s})
     bus))
 
-(defn ctl-remove!
+(defn remove!
   "Remove a control."
   [bus]
-  (node-free* (ctl-get-node bus))
+  (node-free* (control-get-node bus))
   (bus/free bus)
-  (swap! ctl-map* dissoc bus)
+  (swap! store* dissoc bus)
   nil)
 
-(defn node-map-ctl
+(defn- map-control-bus-to-nodes
   "Map a control bus to the parameters of a collection of nodes."
   [nodes param bus]
   (dorun (map
@@ -117,7 +115,7 @@
                    :in-bus1 in-bus1
                    :in-bus2 bus
                    :out-bus out-bus)]
-    (node-map-ctl audio-nodes (last id) (bus/bus-id out-bus))
+    (map-control-bus-to-nodes audio-nodes (last id) (bus/bus-id out-bus))
     (swap! ctl-atom update-in id
       #(into (if (nil? %) [] %) [ctl-node]))
     ctl-node))
@@ -132,7 +130,7 @@
       (if (< (+ index 1) (count ctl-nodes))
         (let [next-node (get ctl-nodes (+ index 1))]
           (node-control* next-node ["in-bus1" (int in-bus1)]))
-        (node-map-ctl audio-nodes (last id) in-bus1))
+        (map-control-bus-to-nodes audio-nodes (last id) in-bus1))
       (swap! ctl-atom update-in id
         #(into [] (remove #{ctl-node} %)))
       (when (= (count ctl-nodes) 1)

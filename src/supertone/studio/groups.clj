@@ -1,7 +1,5 @@
 (ns supertone.studio.groups
-  (:require [overtone.libs.deps                 :only [on-deps satisfy-deps]
-                                                :refer :all]
-            [overtone.sc.node                   :only [group]
+  (:require [overtone.sc.node                   :only [group]
                                                 :refer :all]
             [overtone.sc.server                 :only [ensure-connected!]
                                                 :refer :all]

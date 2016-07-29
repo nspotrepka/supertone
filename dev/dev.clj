@@ -94,8 +94,8 @@
 (defn f1
   []
   (let [i  (inst/add! "sawboy" "seesaw")
-        b  (control/ctl-add! sineboy :freq 1)
-        b2 (control/ctl-add! sineboy :freq 10)
+        b  (control/add! sineboy :freq 1)
+        b2 (control/add! sineboy :freq 10)
         n  (inst/node-add! "seesaw")
         x  (inst/param-delta! "seesaw" "freq" 1)
         y  (inst/param-reset! "seesaw" "freq")
@@ -125,14 +125,14 @@
         b  (first nn)
         b2 (second nn)]
     (inst/remove! "seesaw")
-    (dorun (map #(control/ctl-remove! %) (keys @control/ctl-map*)))))
+    (dorun (map #(control/remove! %) (control/control-list)))))
 
 (defn f4
   []
   (let [i  (inst/add! "sawboy" "dragon")
         f  (fx/add! "dragon" fx-rlpf)
-        b  (control/ctl-add! sineboy :freq 1)
-        b2 (control/ctl-add! sineboy :freq 30)
+        b  (control/add! sineboy :freq 1)
+        b2 (control/add! sineboy :freq 30)
         n  (inst/node-add! "dragon")
         x  (fx/param-delta! "dragon" f "cutoff" 200)
         y  (fx/param-reset! "dragon" f "cutoff")
@@ -174,4 +174,4 @@
   (let [i (audio/inst-get "dragon")
         f (first (audio/fx-list "dragon"))]
     (inst/remove! "dragon")
-    (dorun (map #(control/ctl-remove! %) (keys @control/ctl-map*)))))
+    (dorun (map #(control/remove! %) (control/control-list)))))

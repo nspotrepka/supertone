@@ -1,6 +1,5 @@
 (ns supertone.studio.metro
-  (:require [overtone.libs.event     :refer :all]
-            [overtone.sc.bus         :refer :all]
+  (:require [overtone.sc.bus         :refer :all]
             [overtone.sc.ugens       :refer :all]
             [overtone.sc.node        :refer :all]
             [overtone.sc.synth       :refer :all]

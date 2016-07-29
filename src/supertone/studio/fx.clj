@@ -1,10 +1,6 @@
 (ns supertone.studio.fx
   (:require [overtone.sc.bus                    :refer :all]
             [overtone.sc.node                   :refer :all]
-            [overtone.sc.ugens                  :refer :all]
-            [overtone.sc.synth                  :refer :all]
-            [overtone.studio.core               :refer :all]
-            [overtone.studio.mixer              :refer :all]
             [overtone.studio.inst               :refer :all]
             [supertone.util                     :as util]
             [supertone.studio.bus               :as bus]
