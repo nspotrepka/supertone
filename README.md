@@ -1,7 +1,9 @@
 # Supertone
 
-Supertone is a high-level music workstation focused on quick and easy
+Supertone is a high-level music workstation focused on easy
 composition of electronic tunes in a live setting.
+
+**Not complete! See `supertone.studio.*` for improvements to the Overtone audio engine, fully-functional and ready-to-go. (For test code, check out the `dev` namespace.) MIDI/GUI code is just the basics, still needs work.**
 
 ## Installation
 

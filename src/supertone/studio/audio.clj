@@ -26,7 +26,7 @@
     :fx-store     (util/swap-or fx-store* (:fx-store s) {})
     :fx-control   (util/swap-or fx-control* (:fx-control s) {})
     :inst-io      (util/swap-or inst-io* (:inst-io s) {})
-    :node-order   (util/swap-or node-order* (:node-order s) {})}))
+    :node-order   (util/swap-or node-order* (:node-order s) '())}))
 
 (defn dispose
   [s]
@@ -45,7 +45,7 @@
   (or (keys @inst-store*) '()))
 
 (defn inst-get
-  "Get instrument by name."
+  "Get an instrument by name."
   [name]
   (get @inst-store* name))
 
@@ -55,7 +55,7 @@
   (or (into [] (map #(:node %) (get @fx-store* name))) []))
 
 (defn fx-get
-  "Get the synth for an fx node."
+  "Get the fx synth for an instrument and fx node."
   [name fx-node]
   (:synth
     (some
